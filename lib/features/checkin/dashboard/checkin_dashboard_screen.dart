@@ -266,7 +266,7 @@ class _CheckInDashboardScreenState extends State<CheckInDashboardScreen> {
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
               decoration: BoxDecoration(
-                color: col5 == 'Tamamlandı' ? Colors.green.shade50 : Colors.amber.shade50,
+                color: col5 == 'Tamamlanan' ? Colors.green.shade50 : Colors.amber.shade50,
                 borderRadius: BorderRadius.circular(12),
               ),
               child: Row(
@@ -275,7 +275,7 @@ class _CheckInDashboardScreenState extends State<CheckInDashboardScreen> {
                   Icon(
                       col5 == 'Tamamlandı' ? Icons.check_circle_outline : Icons.access_time,
                       size: 14,
-                      color: col5 == 'Tamamlandı' ? Colors.green.shade700 : Colors.amber.shade700
+                      color: col5 == 'Tamamlanan' ? Colors.green.shade700 : Colors.amber.shade700
                   ),
                   const SizedBox(width: 4),
                   Text(
@@ -283,7 +283,7 @@ class _CheckInDashboardScreenState extends State<CheckInDashboardScreen> {
                     style: TextStyle(
                         fontSize: 11,
                         fontWeight: FontWeight.w600,
-                        color: col5 == 'Tamamlandı' ? Colors.green.shade700 : Colors.amber.shade700
+                        color: col5 == 'Tamamlanan' ? Colors.green.shade700 : Colors.amber.shade700
                     ),
                   ),
                 ],
