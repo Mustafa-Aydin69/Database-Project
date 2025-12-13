@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/services/auth_service.dart';
 
 class CheckInLayout extends StatefulWidget {
   final Widget child;
@@ -37,8 +38,11 @@ class _CheckInLayoutState extends State<CheckInLayout> {
     },
   ];
 
-  void _handleLogout() {
-    context.go('/login');
+  void _handleLogout() async {
+    await AuthService().logout();
+    if (mounted) {
+      context.go('/login');
+    }
   }
 
   @override

@@ -265,7 +265,7 @@ class _FlightsListCard extends StatelessWidget {
                     Column(
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
-                        Text(flight['time']!, style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+
                         const SizedBox(height: 4),
                         _StatusBadge(status: flight['status']!),
                       ],

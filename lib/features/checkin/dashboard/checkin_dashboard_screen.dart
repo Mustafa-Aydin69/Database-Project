@@ -1,49 +1,84 @@
 import 'package:flutter/material.dart';
+import '../../../core/services/checkin_service.dart';
 
-class CheckInDashboardScreen extends StatelessWidget {
+class CheckInDashboardScreen extends StatefulWidget {
   const CheckInDashboardScreen({super.key});
 
   @override
+  State<CheckInDashboardScreen> createState() => _CheckInDashboardScreenState();
+}
+
+class _CheckInDashboardScreenState extends State<CheckInDashboardScreen> {
+  final CheckInService _checkInService = CheckInService();
+  bool _isLoading = true;
+  bool _isLoadingCheckIns = true;
+  CheckInSummary _summary = CheckInSummary.empty();
+  List<LastCompletedCheckIn> _recentCheckIns = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  /// API'den tüm verileri yükle
+  Future<void> _loadData() async {
+    setState(() {
+      _isLoading = true;
+      _isLoadingCheckIns = true;
+    });
+
+    // Özet ve son check-in'leri paralel yükle
+    final results = await Future.wait([
+      _checkInService.getTodaySummary(),
+      _checkInService.getLastCompletedCheckInsToday(),
+    ]);
+
+    final summary = results[0] as CheckInSummary?;
+    final checkIns = results[1] as List<LastCompletedCheckIn>;
+
+    setState(() {
+      _summary = summary ?? CheckInSummary.empty();
+      _recentCheckIns = checkIns;
+      _isLoading = false;
+      _isLoadingCheckIns = false;
+    });
+  }
+
+  @override
   Widget build(BuildContext context) {
-    // --- MOCK VERİLER (React'ten alındı) ---
+    // İstatistik kartları - API'den gelen verilerle dinamik
     final stats = [
       {
         'icon': Icons.confirmation_number_outlined, // ri-ticket-2-line
         'label': 'Bugünkü Check-in',
-        'value': '47',
+        'value': _isLoading ? '...' : _summary.todayCheckInCount.toString(),
         'color': Colors.orange.shade700,
         'bgColor': Colors.orange.shade50,
       },
       {
         'icon': Icons.access_time, // ri-time-line
         'label': 'Bekleyen',
-        'value': '23',
+        'value': _isLoading ? '...' : _summary.pendingCheckInCount.toString(),
         'color': Colors.amber.shade700,
         'bgColor': Colors.amber.shade50,
       },
       {
         'icon': Icons.check_circle_outline, // ri-checkbox-circle-line
         'label': 'Tamamlanan',
-        'value': '24',
+        'value': _isLoading ? '...' : _summary.completedCheckInCount.toString(),
         'color': Colors.green.shade700,
         'bgColor': Colors.green.shade50,
       },
       {
-        'icon': Icons.flight_takeoff, // ri-flight-takeoff-line
-        'label': 'Aktif Uçuşlar',
-        'value': '8',
-        'color': Colors.teal.shade700,
+        'icon': Icons.cancel, // ri-flight-takeoff-line
+        'label': 'İptal Edilen',
+        'value': _isLoading ? '...' : _summary.cancelledCheckInCount.toString(),
+        'color': const Color.fromARGB(186, 187, 0, 0),
         'bgColor': Colors.teal.shade50,
       },
     ];
 
-    final recentCheckIns = [
-      {'id': 'CI001', 'reservationNo': 'R12345', 'passengerName': 'Ahmet Yılmaz', 'flightNo': 'TK101', 'departure': 'IST → AYT', 'status': 'Tamamlandı', 'checkInTime': '10:30'},
-      {'id': 'CI002', 'reservationNo': 'R12346', 'passengerName': 'Ayşe Demir', 'flightNo': 'TK205', 'departure': 'IST → ADB', 'status': 'Tamamlandı', 'checkInTime': '10:45'},
-      {'id': 'CI003', 'reservationNo': 'R12347', 'passengerName': 'Mehmet Kaya', 'flightNo': 'TK301', 'departure': 'IST → ESB', 'status': 'Tamamlandı', 'checkInTime': '11:00'},
-      {'id': 'CI004', 'reservationNo': 'R12348', 'passengerName': 'Fatma Şahin', 'flightNo': 'TK101', 'departure': 'IST → AYT', 'status': 'Tamamlandı', 'checkInTime': '11:15'},
-      {'id': 'CI005', 'reservationNo': 'R12349', 'passengerName': 'Ali Öztürk', 'flightNo': 'TK205', 'departure': 'IST → ADB', 'status': 'Tamamlandı', 'checkInTime': '11:30'},
-    ];
 
     return Scaffold(
       backgroundColor: const Color(0xFFF9FAFB), // bg-gray-50
@@ -96,6 +131,17 @@ class CheckInDashboardScreen extends StatelessWidget {
 
             const SizedBox(height: 24),
 
+            // --- YENİLE BUTONU (Opsiyonel) ---
+            if (_isLoading)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(16.0),
+                  child: CircularProgressIndicator(),
+                ),
+              ),
+
+            const SizedBox(height: 24),
+
             // --- SON İŞLEMLER TABLOSU ---
             Container(
               decoration: BoxDecoration(
@@ -130,29 +176,49 @@ class CheckInDashboardScreen extends StatelessWidget {
                   ),
                   const Divider(height: 1),
 
-                  // Tablo İçeriği
-                  ListView.separated(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    itemCount: recentCheckIns.length,
-                    separatorBuilder: (_, __) => const Divider(height: 1),
-                    itemBuilder: (context, index) {
-                      final item = recentCheckIns[index];
-                      return Padding(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
-                        child: _buildTableRow(
-                          context,
-                          isHeader: false,
-                          col1: item['reservationNo']!,
-                          col2: item['passengerName']!,
-                          col3: item['flightNo']!,
-                          col4: item['departure']!,
-                          col5: item['status']!,
-                          col6: item['checkInTime']!,
-                        ),
-                      );
-                    },
-                  ),
+                  // Tablo İçeriği - Loading, Hata veya Veri durumları
+                  _isLoadingCheckIns
+                      ? const Padding(
+                          padding: EdgeInsets.all(40.0),
+                          child: Center(
+                            child: CircularProgressIndicator(),
+                          ),
+                        )
+                      : _recentCheckIns.isEmpty
+                          ? Padding(
+                              padding: const EdgeInsets.all(40.0),
+                              child: Center(
+                                child: Text(
+                                  'Bugün tamamlanan check-in bulunmamaktadır.',
+                                  style: TextStyle(
+                                    fontSize: 14,
+                                    color: Colors.grey.shade600,
+                                  ),
+                                ),
+                              ),
+                            )
+                          : ListView.separated(
+                              shrinkWrap: true,
+                              physics: const NeverScrollableScrollPhysics(),
+                              itemCount: _recentCheckIns.length,
+                              separatorBuilder: (_, __) => const Divider(height: 1),
+                              itemBuilder: (context, index) {
+                                final item = _recentCheckIns[index];
+                                return Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 16),
+                                  child: _buildTableRow(
+                                    context,
+                                    isHeader: false,
+                                    col1: item.reservationNo,
+                                    col2: item.passengerName,
+                                    col3: item.flightNo.toString(),
+                                    col4: item.route,
+                                    col5: item.status,
+                                    col6: item.checkInTime,
+                                  ),
+                                );
+                              },
+                            ),
                 ],
               ),
             ),

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/services/auth_service.dart';
 
 class ParkingLayout extends StatefulWidget {
   final Widget child;
@@ -47,8 +48,11 @@ class _ParkingLayoutState extends State<ParkingLayout> {
     },
   ];
 
-  void _handleLogout() {
-    context.go('/login');
+  void _handleLogout() async {
+    await AuthService().logout();
+    if (mounted) {
+      context.go('/login');
+    }
   }
 
   @override

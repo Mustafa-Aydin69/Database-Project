@@ -11,6 +11,16 @@ class ReservationsScreen extends StatefulWidget {
 }
 
 class _ReservationsScreenState extends State<ReservationsScreen> {
+  @override
+  void dispose() {
+    _passengerController.dispose();
+    _flightNoController.dispose();
+    _seatNoController.dispose();
+    _priceController.dispose();
+    _bookingDateController.dispose();
+    super.dispose();
+  }
+
   // --- STATE ---
   int _currentPage = 0;
   final int _itemsPerPage = 10;
@@ -22,6 +32,7 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
   final TextEditingController _flightNoController = TextEditingController();
   final TextEditingController _seatNoController = TextEditingController();
   final TextEditingController _priceController = TextEditingController();
+  final TextEditingController _bookingDateController = TextEditingController();
   String _selectedStatus = 'Pending';
   DateTime? _bookingDate;
 
@@ -31,42 +42,76 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
   // --- MOCK VERİLER (React'ten alındı) ---
   List<Map<String, dynamic>> _reservations = [
     {
-      'id': 1, 'passengerName': 'Ahmet Yılmaz', 'flightNumber': 'TK1234',
-      'seatNumber': '12A', 'bookingDate': '2024-01-10', 'status': 'Confirmed', 'price': 1250.0
+      'id': 1,
+      'passengerName': 'Ahmet Yılmaz',
+      'flightNumber': 'TK1234',
+      'seatNumber': '12A',
+      'bookingDate': '2024-01-10',
+      'status': 'Confirmed',
+      'price': 1250.0,
     },
     {
-      'id': 2, 'passengerName': 'Ayşe Demir', 'flightNumber': 'PC5678',
-      'seatNumber': '8C', 'bookingDate': '2024-01-11', 'status': 'Pending', 'price': 890.0
+      'id': 2,
+      'passengerName': 'Ayşe Demir',
+      'flightNumber': 'PC5678',
+      'seatNumber': '8C',
+      'bookingDate': '2024-01-11',
+      'status': 'Pending',
+      'price': 890.0,
     },
     {
-      'id': 3, 'passengerName': 'Mehmet Kaya', 'flightNumber': 'TK9012',
-      'seatNumber': '15F', 'bookingDate': '2024-01-12', 'status': 'Cancelled', 'price': 1450.0
+      'id': 3,
+      'passengerName': 'Mehmet Kaya',
+      'flightNumber': 'TK9012',
+      'seatNumber': '15F',
+      'bookingDate': '2024-01-12',
+      'status': 'Cancelled',
+      'price': 1450.0,
     },
     {
-      'id': 4, 'passengerName': 'Fatma Şahin', 'flightNumber': 'AJ3456',
-      'seatNumber': '22B', 'bookingDate': '2024-01-13', 'status': 'Confirmed', 'price': 980.0
+      'id': 4,
+      'passengerName': 'Fatma Şahin',
+      'flightNumber': 'AJ3456',
+      'seatNumber': '22B',
+      'bookingDate': '2024-01-13',
+      'status': 'Confirmed',
+      'price': 980.0,
     },
     {
-      'id': 5, 'passengerName': 'Ali Öztürk', 'flightNumber': 'TK7890',
-      'seatNumber': '5D', 'bookingDate': '2024-01-14', 'status': 'Confirmed', 'price': 2100.0
+      'id': 5,
+      'passengerName': 'Ali Öztürk',
+      'flightNumber': 'TK7890',
+      'seatNumber': '5D',
+      'bookingDate': '2024-01-14',
+      'status': 'Confirmed',
+      'price': 2100.0,
     },
     // Sayfalama için ek veri
-    ...List.generate(15, (index) => {
-      'id': 6 + index,
-      'passengerName': 'Yolcu ${index + 1}',
-      'flightNumber': 'TK${1000 + index}',
-      'seatNumber': '${index + 1}A',
-      'bookingDate': '2024-01-${15 + index}',
-      'status': index % 3 == 0 ? 'Confirmed' : (index % 3 == 1 ? 'Pending' : 'Cancelled'),
-      'price': 1000.0 + (index * 50)
-    }),
+    ...List.generate(
+      15,
+      (index) => {
+        'id': 6 + index,
+        'passengerName': 'Yolcu ${index + 1}',
+        'flightNumber': 'TK${1000 + index}',
+        'seatNumber': '${index + 1}A',
+        'bookingDate': '2024-01-${15 + index}',
+        'status': index % 3 == 0
+            ? 'Confirmed'
+            : (index % 3 == 1 ? 'Pending' : 'Cancelled'),
+        'price': 1000.0 + (index * 50),
+      },
+    ),
   ];
 
   // --- FİLTRELEME ---
   List<Map<String, dynamic>> get _filteredReservations {
     return _reservations.where((r) {
-      return r['passengerName'].toString().toLowerCase().contains(_searchTerm.toLowerCase()) ||
-          r['flightNumber'].toString().toLowerCase().contains(_searchTerm.toLowerCase());
+      return r['passengerName'].toString().toLowerCase().contains(
+            _searchTerm.toLowerCase(),
+          ) ||
+          r['flightNumber'].toString().toLowerCase().contains(
+            _searchTerm.toLowerCase(),
+          );
     }).toList();
   }
 
@@ -82,6 +127,7 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
     if (picked != null && picked != _bookingDate) {
       setState(() {
         _bookingDate = picked;
+        _bookingDateController.text = DateFormat('dd.MM.yyyy').format(picked);
       });
     }
   }
@@ -94,124 +140,191 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
       _priceController.text = reservation['price'].toString();
       _selectedStatus = reservation['status'];
       _bookingDate = DateTime.parse(reservation['bookingDate']);
+      _bookingDateController.text = DateFormat(
+        'dd.MM.yyyy',
+      ).format(_bookingDate!);
     } else {
       _passengerController.clear();
       _flightNoController.clear();
       _seatNoController.clear();
       _priceController.clear();
       _selectedStatus = 'Pending';
-      _bookingDate = DateTime.now();
+      _bookingDate = null;
+      _bookingDateController.clear();
     }
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(reservation != null ? 'Rezervasyon Düzenle' : 'Yeni Rezervasyon'),
-        content: SizedBox(
-          width: 400,
-          child: SingleChildScrollView(
-            child: Form(
-              key: _formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  TextFormField(
-                    controller: _passengerController,
-                    decoration: const InputDecoration(labelText: "Yolcu Adı", border: OutlineInputBorder(), prefixIcon: Icon(Icons.person)),
-                    validator: (v) => v!.isEmpty ? "Zorunlu alan" : null,
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            title: Text(
+              reservation != null
+                  ? 'Rezervasyon Görüntüle'
+                  : 'Yeni Rezervasyon',
+            ),
+            content: SizedBox(
+              width: 400,
+              child: SingleChildScrollView(
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
                     children: [
-                      Expanded(
-                        child: TextFormField(
-                          controller: _flightNoController,
-                          decoration: const InputDecoration(labelText: "Uçuş No", border: OutlineInputBorder(), prefixIcon: Icon(Icons.flight)),
-                          validator: (v) => v!.isEmpty ? "Gerekli" : null,
+                      TextFormField(
+                        controller: _passengerController,
+                        decoration: const InputDecoration(
+                          labelText: "Yolcu Adı",
+                          border: OutlineInputBorder(),
+                          prefixIcon: Icon(Icons.person),
+                        ),
+                        validator: (v) => v!.isEmpty ? "Zorunlu alan" : null,
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextFormField(
+                              controller: _flightNoController,
+                              decoration: const InputDecoration(
+                                labelText: "Uçuş No",
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.flight),
+                              ),
+                              validator: (v) => v!.isEmpty ? "Gerekli" : null,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: TextFormField(
+                              controller: _seatNoController,
+                              decoration: const InputDecoration(
+                                labelText: "Koltuk No",
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.event_seat),
+                              ),
+                              validator: (v) => v!.isEmpty ? "Gerekli" : null,
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
+                      GestureDetector(
+                        onTap: () async {
+                          FocusScope.of(context).unfocus();
+                          await _selectDate(context);
+                          setDialogState(() {});
+                        },
+                        child: AbsorbPointer(
+                          child: TextFormField(
+                            readOnly: true,
+                            decoration: const InputDecoration(
+                              labelText: "Tarih",
+                              border: OutlineInputBorder(),
+                              suffixIcon: Icon(Icons.calendar_today),
+                            ),
+                            controller: _bookingDateController,
+                            validator: (v) =>
+                                _bookingDate == null ? "Tarih seçiniz" : null,
+                          ),
                         ),
                       ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: TextFormField(
-                          controller: _seatNoController,
-                          decoration: const InputDecoration(labelText: "Koltuk No", border: OutlineInputBorder(), prefixIcon: Icon(Icons.event_seat)),
-                          validator: (v) => v!.isEmpty ? "Gerekli" : null,
-                        ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: DropdownButtonFormField<String>(
+                              value: _selectedStatus,
+                              decoration: const InputDecoration(
+                                labelText: "Durum",
+                                border: OutlineInputBorder(),
+                              ),
+                              items: _statuses
+                                  .map(
+                                    (s) => DropdownMenuItem(
+                                      value: s,
+                                      child: Text(s),
+                                    ),
+                                  )
+                                  .toList(),
+                              onChanged: (val) =>
+                                  setDialogState(() => _selectedStatus = val!),
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: TextFormField(
+                              controller: _priceController,
+                              decoration: const InputDecoration(
+                                labelText: "Fiyat (₺)",
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.attach_money),
+                              ),
+                              keyboardType: TextInputType.number,
+                              validator: (v) => v!.isEmpty ? "Gerekli" : null,
+                            ),
+                          ),
+                        ],
                       ),
                     ],
                   ),
-                  const SizedBox(height: 16),
-                  InkWell(
-                    onTap: () => _selectDate(context),
-                    child: InputDecorator(
-                      decoration: const InputDecoration(labelText: "Tarih", border: OutlineInputBorder(), suffixIcon: Icon(Icons.calendar_today)),
-                      child: Text(_bookingDate == null ? "Seçiniz" : DateFormat('yyyy-MM-dd').format(_bookingDate!)),
-                    ),
-                  ),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(
-                        child: DropdownButtonFormField<String>(
-                          value: _selectedStatus,
-                          decoration: const InputDecoration(labelText: "Durum", border: OutlineInputBorder()),
-                          items: _statuses.map((s) => DropdownMenuItem(value: s, child: Text(s))).toList(),
-                          onChanged: (val) => setState(() => _selectedStatus = val!),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: TextFormField(
-                          controller: _priceController,
-                          decoration: const InputDecoration(labelText: "Fiyat (₺)", border: OutlineInputBorder(), prefixIcon: Icon(Icons.attach_money)),
-                          keyboardType: TextInputType.number,
-                          validator: (v) => v!.isEmpty ? "Gerekli" : null,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
+                ),
               ),
             ),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
-            onPressed: () {
-              if (_formKey.currentState!.validate() && _bookingDate != null) {
-                setState(() {
-                  if (reservation != null) {
-                    final index = _reservations.indexWhere((r) => r['id'] == reservation['id']);
-                    _reservations[index] = {
-                      'id': reservation['id'],
-                      'passengerName': _passengerController.text,
-                      'flightNumber': _flightNoController.text,
-                      'seatNumber': _seatNoController.text,
-                      'bookingDate': DateFormat('yyyy-MM-dd').format(_bookingDate!),
-                      'status': _selectedStatus,
-                      'price': double.parse(_priceController.text),
-                    };
-                  } else {
-                    _reservations.insert(0, {
-                      'id': DateTime.now().millisecondsSinceEpoch,
-                      'passengerName': _passengerController.text,
-                      'flightNumber': _flightNoController.text,
-                      'seatNumber': _seatNoController.text,
-                      'bookingDate': DateFormat('yyyy-MM-dd').format(_bookingDate!),
-                      'status': _selectedStatus,
-                      'price': double.parse(_priceController.text),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text("İptal"),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.teal,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () {
+                  if (_formKey.currentState!.validate() &&
+                      _bookingDate != null) {
+                    setState(() {
+                      if (reservation != null) {
+                        final index = _reservations.indexWhere(
+                          (r) => r['id'] == reservation['id'],
+                        );
+                        _reservations[index] = {
+                          'id': reservation['id'],
+                          'passengerName': _passengerController.text,
+                          'flightNumber': _flightNoController.text,
+                          'seatNumber': _seatNoController.text,
+                          'bookingDate': DateFormat(
+                            'yyyy-MM-dd',
+                          ).format(_bookingDate!),
+                          'status': _selectedStatus,
+                          'price': double.parse(_priceController.text),
+                        };
+                      } else {
+                        _reservations.insert(0, {
+                          'id': DateTime.now().millisecondsSinceEpoch,
+                          'passengerName': _passengerController.text,
+                          'flightNumber': _flightNoController.text,
+                          'seatNumber': _seatNoController.text,
+                          'bookingDate': DateFormat(
+                            'yyyy-MM-dd',
+                          ).format(_bookingDate!),
+                          'status': _selectedStatus,
+                          'price': double.parse(_priceController.text),
+                        });
+                      }
                     });
+                    Navigator.pop(context);
                   }
-                });
-                Navigator.pop(context);
-              }
-            },
-            child: Text(reservation != null ? "Güncelle" : "Ekle"),
-          ),
-        ],
+                },
+                child: Text(reservation != null ? "Güncelle" : "Ekle"),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -221,9 +334,14 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text("Emin misiniz?"),
-        content: const Text("Bu rezervasyonu silmek istediğinizden emin misiniz?"),
+        content: const Text(
+          "Bu rezervasyonu silmek istediğinizden emin misiniz?",
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text("İptal"),
+          ),
           TextButton(
             onPressed: () {
               setState(() => _reservations.removeWhere((r) => r['id'] == id));
@@ -240,10 +358,13 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
   Widget build(BuildContext context) {
     final filtered = _filteredReservations;
     final totalPages = (filtered.length / _itemsPerPage).ceil();
-    if (_currentPage >= totalPages && totalPages > 0) _currentPage = totalPages - 1;
+    if (_currentPage >= totalPages && totalPages > 0)
+      _currentPage = totalPages - 1;
     final startIndex = _currentPage * _itemsPerPage;
     final endIndex = min(startIndex + _itemsPerPage, filtered.length);
-    final currentData = filtered.isEmpty ? [] : filtered.sublist(startIndex, endIndex);
+    final currentData = filtered.isEmpty
+        ? []
+        : filtered.sublist(startIndex, endIndex);
 
     return Scaffold(
       backgroundColor: const Color(0xFFF9FAFB),
@@ -259,9 +380,19 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
                 const Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text("Rezervasyon Yönetimi", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black87)),
+                    Text(
+                      "Rezervasyon Yönetimi",
+                      style: TextStyle(
+                        fontSize: 24,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.black87,
+                      ),
+                    ),
                     SizedBox(height: 4),
-                    Text("Rezervasyonları yönetin", style: TextStyle(color: Colors.grey)),
+                    Text(
+                      "Rezervasyonları yönetin",
+                      style: TextStyle(color: Colors.grey),
+                    ),
                   ],
                 ),
                 ElevatedButton.icon(
@@ -269,7 +400,10 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
                   style: ElevatedButton.styleFrom(
                     backgroundColor: Colors.teal,
                     foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 20,
+                      vertical: 12,
+                    ),
                   ),
                   icon: const Icon(Icons.add),
                   label: const Text("Yeni Rezervasyon"),
@@ -282,7 +416,11 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
             // --- ARAMA ---
             Container(
               padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade200)),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey.shade200),
+              ),
               child: TextField(
                 onChanged: (val) => setState(() => _searchTerm = val),
                 decoration: const InputDecoration(
@@ -298,11 +436,18 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
 
             // --- KART LİSTESİ ---
             if (currentData.isEmpty)
-              const Center(child: Padding(padding: EdgeInsets.all(40), child: Text("Rezervasyon bulunamadı.")))
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(40),
+                  child: Text("Rezervasyon bulunamadı."),
+                ),
+              )
             else
               LayoutBuilder(
                 builder: (context, constraints) {
-                  int crossAxisCount = constraints.maxWidth > 1100 ? 3 : (constraints.maxWidth > 700 ? 2 : 1);
+                  int crossAxisCount = constraints.maxWidth > 1100
+                      ? 3
+                      : (constraints.maxWidth > 700 ? 2 : 1);
                   return GridView.builder(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
@@ -316,8 +461,11 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
                     itemBuilder: (context, index) {
                       return _ReservationCard(
                         reservation: currentData[index],
-                        onEdit: () => context.go('/admin/reservations/${currentData[index]['id']}'),
-                        onDelete: () => _deleteReservation(currentData[index]['id']),
+                        onEdit: () => context.go(
+                          '/admin/reservations/${currentData[index]['id']}',
+                        ),
+                        onDelete: () =>
+                            _deleteReservation(currentData[index]['id']),
                       );
                     },
                   );
@@ -329,9 +477,19 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
             Row(
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                IconButton(onPressed: _currentPage > 0 ? () => setState(() => _currentPage--) : null, icon: const Icon(Icons.chevron_left)),
+                IconButton(
+                  onPressed: _currentPage > 0
+                      ? () => setState(() => _currentPage--)
+                      : null,
+                  icon: const Icon(Icons.chevron_left),
+                ),
                 Text("Sayfa ${_currentPage + 1} / $totalPages"),
-                IconButton(onPressed: _currentPage < totalPages - 1 ? () => setState(() => _currentPage++) : null, icon: const Icon(Icons.chevron_right)),
+                IconButton(
+                  onPressed: _currentPage < totalPages - 1
+                      ? () => setState(() => _currentPage++)
+                      : null,
+                  icon: const Icon(Icons.chevron_right),
+                ),
               ],
             ),
           ],
@@ -347,21 +505,33 @@ class _ReservationCard extends StatelessWidget {
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
-  const _ReservationCard({required this.reservation, required this.onEdit, required this.onDelete});
+  const _ReservationCard({
+    required this.reservation,
+    required this.onEdit,
+    required this.onDelete,
+  });
 
   Color _getStatusColor(String status) {
     switch (status) {
-      case 'Confirmed': return Colors.green;
-      case 'Pending': return Colors.orange;
-      case 'Cancelled': return Colors.red;
-      default: return Colors.grey;
+      case 'Confirmed':
+        return Colors.green;
+      case 'Pending':
+        return Colors.orange;
+      case 'Cancelled':
+        return Colors.red;
+      default:
+        return Colors.grey;
     }
   }
 
   @override
   Widget build(BuildContext context) {
     final statusColor = _getStatusColor(reservation['status']);
-    final currencyFormat = NumberFormat.currency(locale: 'tr_TR', symbol: '₺', decimalDigits: 0);
+    final currencyFormat = NumberFormat.currency(
+      locale: 'tr_TR',
+      symbol: '₺',
+      decimalDigits: 0,
+    );
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -369,7 +539,9 @@ class _ReservationCard extends StatelessWidget {
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(color: Colors.grey.shade200),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 5)],
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 5),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -381,14 +553,27 @@ class _ReservationCard extends StatelessWidget {
               Expanded(
                 child: Text(
                   reservation['passengerName'],
-                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 16,
+                  ),
                   overflow: TextOverflow.ellipsis,
                 ),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(color: statusColor.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-                child: Text(reservation['status'], style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: statusColor)),
+                decoration: BoxDecoration(
+                  color: statusColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(
+                  reservation['status'],
+                  style: TextStyle(
+                    fontSize: 11,
+                    fontWeight: FontWeight.bold,
+                    color: statusColor,
+                  ),
+                ),
               ),
             ],
           ),
@@ -399,11 +584,23 @@ class _ReservationCard extends StatelessWidget {
             children: [
               const Icon(Icons.flight, size: 16, color: Colors.grey),
               const SizedBox(width: 8),
-              Text(reservation['flightNumber'], style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+              Text(
+                reservation['flightNumber'],
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
               const Spacer(),
               const Icon(Icons.event_seat, size: 16, color: Colors.grey),
               const SizedBox(width: 8),
-              Text(reservation['seatNumber'], style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w500)),
+              Text(
+                reservation['seatNumber'],
+                style: const TextStyle(
+                  fontSize: 13,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
             ],
           ),
           const SizedBox(height: 8),
@@ -411,7 +608,10 @@ class _ReservationCard extends StatelessWidget {
             children: [
               const Icon(Icons.calendar_today, size: 16, color: Colors.grey),
               const SizedBox(width: 8),
-              Text(reservation['bookingDate'], style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
+              Text(
+                reservation['bookingDate'],
+                style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+              ),
             ],
           ),
 
@@ -422,15 +622,29 @@ class _ReservationCard extends StatelessWidget {
             children: [
               Text(
                 currencyFormat.format(reservation['price']),
-                style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.teal),
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  fontSize: 16,
+                  color: Colors.teal,
+                ),
               ),
               Row(
                 children: [
-                  InkWell(onTap: onEdit, child: const Icon(Icons.edit, size: 20, color: Colors.teal)),
+                  InkWell(
+                    onTap: onEdit,
+                    child: const Icon(Icons.visibility, size: 20, color: Colors.teal),
+                  ),
                   const SizedBox(width: 12),
-                  InkWell(onTap: onDelete, child: const Icon(Icons.delete_outline, size: 20, color: Colors.red)),
+                  InkWell(
+                    onTap: onDelete,
+                    child: const Icon(
+                      Icons.delete_outline,
+                      size: 20,
+                      color: Colors.red,
+                    ),
+                  ),
                 ],
-              )
+              ),
             ],
           ),
         ],
