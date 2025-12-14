@@ -255,41 +255,70 @@ class _EntryExitScreenState extends State<EntryExitScreen> with SingleTickerProv
             onPressed: _isSubmittingEntry
                 ? null
                 : () async {
-                    if (_entryFormKey.currentState!.validate()) {
+                    debugPrint('ENTRY_BUTTON_CLICKED');
+                    final valid = _entryFormKey.currentState!.validate();
+                    if (!valid) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Lütfen zorunlu alanları doldurun'), backgroundColor: Colors.orange),
+                      );
+                      return;
+                    }
+                    setState(() {
+                      _isSubmittingEntry = true;
+                      _entryError = null;
+                    });
+                    final payload = {
+                      'plateNumber': _plateController.text.trim(),
+                      'typeId': _selectedVehicleTypeId,
+                      'ownerFullName': _ownerNameController.text.trim(),
+                      'ownerPhone': _phoneController.text.trim(),
+                      'parkingLotId': _selectedParkingLotId,
+                      'spotNumber': _spotController.text.trim(),
+                    };
+                    debugPrint('ENTRY_REQUEST_PAYLOAD=$payload');
+                    try {
+                      final result = await ParkingApiService.createParkingEntry(
+                        plateNumber: _plateController.text.trim(),
+                        typeId: _selectedVehicleTypeId!,
+                        ownerFullName: _ownerNameController.text.trim(),
+                        ownerPhone: _phoneController.text.trim(),
+                        parkingLotId: _selectedParkingLotId!,
+                        spotNumber: _spotController.text.trim(),
+                      );
+                      debugPrint('ENTRY_RESPONSE_DATA=$result');
                       setState(() {
-                        _isSubmittingEntry = true;
-                        _entryError = null;
+                        _parkedVehicles.insert(0, {
+                          'id': (result['ParkingReservationID'] ?? DateTime.now().millisecondsSinceEpoch).toString(),
+                          'plate': _plateController.text,
+                          'vehicleType': _selectedVehicleTypeName,
+                          'ownerName': _ownerNameController.text,
+                          'ownerPhone': _phoneController.text,
+                          'entryTime': DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now()),
+                          'spotNumber': _spotController.text,
+                          'parkingLotID': _selectedParkingLotId,
+                          'parkingLotName': _selectedParkingLotName,
+                          'status': 'parked'
+                        });
                       });
-                      try {
-                        final result = await ParkingApiService.createParkingEntry(
-                          plateNumber: _plateController.text.trim(),
-                          typeId: _selectedVehicleTypeId!,
-                          ownerFullName: _ownerNameController.text.trim(),
-                          ownerPhone: _phoneController.text.trim(),
-                          parkingLotId: _selectedParkingLotId!,
-                          spotNumber: _spotController.text.trim(),
-                        );
-                        setState(() {
-                          _parkedVehicles.insert(0, {
-                            'id': (result['ParkingReservationID'] ?? DateTime.now().millisecondsSinceEpoch).toString(),
-                            'plate': _plateController.text,
-                            'vehicleType': _selectedVehicleTypeName,
-                            'ownerName': _ownerNameController.text,
-                            'ownerPhone': _phoneController.text,
-                            'entryTime': DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now()),
-                            'spotNumber': _spotController.text,
-                            'parkingLotID': _selectedParkingLotId,
-                            'parkingLotName': _selectedParkingLotName,
-                            'status': 'parked'
-                          });
-                        });
-                        Navigator.pop(context);
-                      } catch (e) {
-                        setState(() {
-                          _entryError = e.toString();
-                          _isSubmittingEntry = false;
-                        });
-                      }
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Giriş başarılı'), backgroundColor: Colors.green),
+                      );
+                      Navigator.pop(context);
+                      _loadParked();
+                    } catch (e) {
+                      final msg = e.toString();
+                      setState(() {
+                        _entryError = msg;
+                        _isSubmittingEntry = false;
+                      });
+                      final lower = msg.toLowerCase();
+                      final userMsg = lower.contains('spot_occupied')
+                          ? 'Seçilen park yeri dolu'
+                          : msg.replaceFirst('Exception: ', '');
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(userMsg), backgroundColor: Colors.red),
+                      );
+                      debugPrint('ENTRY_RESPONSE_ERROR=$msg');
                     }
                   },
             child: _isSubmittingEntry ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Text("Giriş Yap"),

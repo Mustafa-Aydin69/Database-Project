@@ -64,6 +64,75 @@ router.get('/recent-checkouts', async (req, res) => {
   }
 });
 
+router.get('/parking-lots/:parkingLotId/detail', async (req, res) => {
+  try {
+    const db = require('../config/database');
+    const getPool = db.getPool;
+    const sql = db.sql;
+    const idRaw = req.params.parkingLotId;
+    const parkingLotId = parseInt(idRaw);
+    if (isNaN(parkingLotId) || parkingLotId <= 0) {
+      return res.status(400).json({ success: false, message: 'Geçersiz ParkingLotID' });
+    }
+    const pool = await getPool();
+    const request = pool.request();
+    request.input('ParkingLotID', sql.Int, parkingLotId);
+    const result = await request.execute('AirportParkingSystem.usp_GetParkingLotDetail');
+    const sets = result.recordsets || [];
+    const summarySet = sets[0] || [];
+    const terminalSet = sets[1] || [];
+    const spotSet = sets[2] || [];
+    if (!summarySet[0] || spotSet.length === 0) {
+      return res.status(404).json({ success: false, message: 'Kayıt bulunamadı' });
+    }
+    const s = summarySet[0];
+    const summary = {
+      parkingLotId: s.ParkingLotID ?? s.parkingLotId ?? parkingLotId,
+      lotName: s.LotName ?? s.lotName ?? '',
+      totalSpots: parseInt(s.TotalSpots ?? s.totalSpots ?? 0) || 0,
+      emptyCount: parseInt(s.EmptyCount ?? s.emptyCount ?? 0) || 0,
+      occupiedCount: parseInt(s.OccupiedCount ?? s.occupiedCount ?? 0) || 0,
+      reservedCount: parseInt(s.ReservedCount ?? s.reservedCount ?? 0) || 0,
+      maintenanceCount: parseInt(s.MaintenanceCount ?? s.maintenanceCount ?? 0) || 0,
+    };
+    const terminals = terminalSet.map(t => ({
+      terminalCode: t.TerminalCode ?? t.terminalCode ?? '',
+      totalSpots: parseInt(t.TotalSpots ?? t.totalSpots ?? 0) || 0,
+      emptyCount: parseInt(t.EmptyCount ?? t.emptyCount ?? 0) || 0,
+      occupiedCount: parseInt(t.OccupiedCount ?? t.occupiedCount ?? 0) || 0,
+      reservedCount: parseInt(t.ReservedCount ?? t.reservedCount ?? 0) || 0,
+      maintenanceCount: parseInt(t.MaintenanceCount ?? t.maintenanceCount ?? 0) || 0,
+    }));
+    const spots = spotSet.map(sp => {
+      const spotId = parseInt(sp.SpotID ?? sp.spotId ?? 0) || 0;
+      const parkingLotIdNorm = parseInt(sp.ParkingLotID ?? sp.parkingLotId ?? parkingLotId) || parkingLotId;
+      const terminalCode = sp.TerminalCode ?? sp.terminalCode ?? '';
+      const spotNumber = sp.SpotNumber ?? sp.spotNumber ?? '';
+      const isReservedRaw = sp.IsReserved ?? sp.isReserved ?? 0;
+      const isReservedParsed = parseInt(isReservedRaw);
+      const isReserved = isReservedParsed === 1 ? 1 : 0;
+      const rawStatus = (sp.SpotStatus ?? sp.spotStatus ?? '').toString().trim().toUpperCase();
+      const spotStatus = rawStatus === 'EMPTY' || rawStatus === 'OCCUPIED'
+        ? rawStatus
+        : (isReserved === 1 ? 'OCCUPIED' : 'EMPTY');
+      return {
+        spotId,
+        parkingLotId: parkingLotIdNorm,
+        terminalCode,
+        spotNumber,
+        spotStatus,
+        isReserved,
+      };
+    });
+    return res.status(200).json({ summary, terminals, spots });
+  } catch (error) {
+    console.error('Parking lot detail error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Sunucu hatası: ' + error.message
+    });
+  }
+});
 // POST /api/parking/checkout
 router.post('/checkout', async (req, res) => {
   try {
@@ -377,24 +446,26 @@ router.get('/parking-lots', async (req, res) => {
   }
 });
 
-router.get('/vehicle-types', async (req, res) => {
+// GET /api/parking/parking-lots/with-occupancy
+router.get('/parking-lots/with-occupancy', async (req, res) => {
   try {
     const pool = await getPool();
-    const result = await pool.request().execute('AirportParkingSystem.usp_GetVehicleTypesForDropdown');
-    const rows = (result.recordset || []).map(row => ({
-      typeID: row.TypeID ?? row.typeID ?? row.typeId ?? null,
-      typeName: row.TypeName ?? row.typeName ?? ''
+    const result = await pool.request().execute('AirportParkingSystem.usp_GetParkingLotsWithOccupancy');
+    const rows = (result.recordset || []).map((row) => ({
+      lotName: row.LotName ?? row.lotName ?? '',
+      occupancyRate: typeof row.OccupancyRate === 'number'
+        ? row.OccupancyRate
+        : parseFloat(row.OccupancyRate ?? row.occupancyRate ?? 0) || 0
     }));
-    return res.json({ success: true, data: rows });
+    return res.status(200).json(rows);
   } catch (error) {
-    console.error('Vehicle types error:', error);
+    console.error('Parking lots with occupancy error:', error);
     return res.status(500).json({
       success: false,
       message: 'Sunucu hatası: ' + error.message
     });
   }
 });
-
 router.post('/entry', async (req, res) => {
   try {
     const db = require('../config/database');

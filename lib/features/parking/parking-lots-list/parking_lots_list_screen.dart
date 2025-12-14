@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'dart:math';
+import '../entry-exit/models/parking_lot_dropdown_item.dart';
+import '../entry-exit/services/parking_lots_api.dart';
+import 'models/parking_lot_occupancy.dart';
 
 class ParkingLotsListScreen extends StatefulWidget {
   const ParkingLotsListScreen({super.key});
@@ -11,30 +14,23 @@ class ParkingLotsListScreen extends StatefulWidget {
 
 class _ParkingLotsListScreenState extends State<ParkingLotsListScreen> {
   String _searchTerm = "";
+  int? _selectedParkingLotId;
+  String? _selectedParkingLotName;
+  Future<List<ParkingLotDropdownItem>>? _parkingLotsFuture;
   String _filterAirport = "";
+  Future<List<ParkingLotOccupancy>>? _lotsFuture;
+  Map<String, int> _lotIdByName = {};
 
   // Sabit Listeler
   final List<String> _airports = ['İstanbul Havalimanı (IST)', 'Sabiha Gökçen (SAW)', 'Antalya Havalimanı (AYT)', 'Esenboğa (ESB)'];
 
-  // --- MOCK VERİLER ---
-  final List<Map<String, dynamic>> _parkingLots = [
-    {'id': 1, 'airportName': 'İstanbul Havalimanı (IST)', 'lotName': 'A Terminali Otopark', 'totalSpots': 125, 'occupiedSpots': 87, 'blocks': ['A', 'B', 'C', 'D', 'E']},
-    {'id': 2, 'airportName': 'İstanbul Havalimanı (IST)', 'lotName': 'B Terminali Otopark', 'totalSpots': 125, 'occupiedSpots': 64, 'blocks': ['A', 'B', 'C', 'D', 'E']},
-    {'id': 3, 'airportName': 'Sabiha Gökçen (SAW)', 'lotName': 'Açık Otopark', 'totalSpots': 125, 'occupiedSpots': 92, 'blocks': ['A', 'B', 'C', 'D', 'E']},
-    {'id': 4, 'airportName': 'Sabiha Gökçen (SAW)', 'lotName': 'Kapalı Otopark', 'totalSpots': 125, 'occupiedSpots': 45, 'blocks': ['A', 'B', 'C', 'D', 'E']},
-    {'id': 5, 'airportName': 'Antalya Havalimanı (AYT)', 'lotName': 'Kapalı Otopark', 'totalSpots': 125, 'occupiedSpots': 103, 'blocks': ['A', 'B', 'C', 'D', 'E']},
-    {'id': 6, 'airportName': 'Antalya Havalimanı (AYT)', 'lotName': 'VIP Otopark', 'totalSpots': 125, 'occupiedSpots': 28, 'blocks': ['A', 'B', 'C', 'D', 'E']},
-    {'id': 7, 'airportName': 'Esenboğa (ESB)', 'lotName': 'Terminal Otopark', 'totalSpots': 125, 'occupiedSpots': 76, 'blocks': ['A', 'B', 'C', 'D', 'E']},
-    {'id': 8, 'airportName': 'Esenboğa (ESB)', 'lotName': 'Uzun Süreli Otopark', 'totalSpots': 125, 'occupiedSpots': 51, 'blocks': ['A', 'B', 'C', 'D', 'E']},
-  ];
-
   // --- FİLTRELEME ---
-  List<Map<String, dynamic>> get _filteredLots {
-    return _parkingLots.where((lot) {
-      final matchesSearch = lot['lotName'].toString().toLowerCase().contains(_searchTerm.toLowerCase()) ||
-          lot['airportName'].toString().toLowerCase().contains(_searchTerm.toLowerCase());
-      final matchesAirport = _filterAirport.isEmpty || lot['airportName'] == _filterAirport;
-      return matchesSearch && matchesAirport;
+  List<ParkingLotOccupancy> _filterLots(List<ParkingLotOccupancy> lots) {
+    final term = _searchTerm.toLowerCase();
+    return lots.where((lot) {
+      final matchesSearch = lot.lotName.toLowerCase().contains(term);
+      final matchesSelection = _selectedParkingLotName == null || lot.lotName == _selectedParkingLotName;
+      return matchesSearch && matchesSelection;
     }).toList();
   }
 
@@ -42,6 +38,13 @@ class _ParkingLotsListScreenState extends State<ParkingLotsListScreen> {
     if (percentage >= 90) return Colors.red;
     if (percentage >= 70) return Colors.orange;
     return Colors.green;
+  }
+
+  @override
+  void initState() {
+    super.initState();
+    _parkingLotsFuture = ParkingLotsApi.fetch();
+    _lotsFuture = ParkingLotsApi.fetchParkingLotsWithOccupancy();
   }
 
   @override
@@ -86,18 +89,170 @@ class _ParkingLotsListScreenState extends State<ParkingLotsListScreen> {
                         ),
                       ),
                       SizedBox(width: isMobile ? 0 : 16, height: isMobile ? 16 : 0),
-                      SizedBox(
-                        width: isMobile ? double.infinity : 250,
-                        child: DropdownButtonFormField<String>(
-                          value: _filterAirport.isEmpty ? null : _filterAirport,
-                          decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12), hintText: "Tüm Havalimanları"),
-                          items: [
-                            const DropdownMenuItem(value: "", child: Text("Tüm Havalimanları")),
-                            ..._airports.map((a) => DropdownMenuItem(value: a, child: Text(a))),
-                          ],
-                          onChanged: (val) => setState(() => _filterAirport = val ?? ""),
-                        ),
-                      ),
+                      isMobile
+                          ? SizedBox(
+                              width: double.infinity,
+                              child: FutureBuilder<List<ParkingLotDropdownItem>>(
+                                future: _parkingLotsFuture,
+                                builder: (context, snap) {
+                                  if (snap.connectionState == ConnectionState.waiting) {
+                                    return SizedBox(
+                                      height: 48,
+                                      child: InputDecorator(
+                                        decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12), hintText: "Otopark seçin"),
+                                        child: Row(
+                                          children: const [
+                                            SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                                            SizedBox(width: 8),
+                                            Text("Yükleniyor...")
+                                          ],
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                  if (snap.hasError) {
+                                    return InputDecorator(
+                                      decoration: const InputDecoration(
+                                        border: OutlineInputBorder(),
+                                        contentPadding: EdgeInsets.symmetric(horizontal: 12),
+                                        hintText: "Otopark seçin",
+                                        errorText: "Otopark listesi yüklenemedi",
+                                      ),
+                                      child: const SizedBox.shrink(),
+                                    );
+                                  }
+                                  final items = snap.data ?? [];
+                                  if (items.isEmpty) {
+                                    return InputDecorator(
+                                      decoration: const InputDecoration(
+                                        border: OutlineInputBorder(),
+                                        contentPadding: EdgeInsets.symmetric(horizontal: 12),
+                                        hintText: "Otopark seçin",
+                                        errorText: "Otopark listesi bulunamadı",
+                                      ),
+                                      child: const SizedBox.shrink(),
+                                    );
+                                  }
+                                  if (_lotIdByName.isEmpty) {
+                                    final map = <String, int>{};
+                                    for (final e in items) {
+                                      map[e.lotName] = e.parkingLotID;
+                                    }
+                                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                                      if (mounted) setState(() => _lotIdByName = map);
+                                    });
+                                  }
+                                  return DropdownButtonFormField<int>(
+                                    isExpanded: true,
+                                    value: _selectedParkingLotId,
+                                    decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12), hintText: "Otopark seçin"),
+                                    items: items
+                                        .map((e) => DropdownMenuItem<int>(
+                                              value: e.parkingLotID,
+                                              child: Text(
+                                                e.lotName,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ))
+                                        .toList(),
+                                    onChanged: (val) {
+                                      setState(() {
+                                        _selectedParkingLotId = val;
+                                        String? name;
+                                        for (final e in items) {
+                                          if (e.parkingLotID == val) {
+                                            name = e.lotName;
+                                            break;
+                                          }
+                                        }
+                                        _selectedParkingLotName = name;
+                                      });
+                                    },
+                                  );
+                                },
+                              ),
+                            )
+                          : Flexible(
+                              child: FutureBuilder<List<ParkingLotDropdownItem>>(
+                                future: _parkingLotsFuture,
+                                builder: (context, snap) {
+                                  if (snap.connectionState == ConnectionState.waiting) {
+                                    return SizedBox(
+                                      height: 48,
+                                      child: InputDecorator(
+                                        decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12), hintText: "Otopark seçin"),
+                                        child: Row(
+                                          children: const [
+                                            SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2)),
+                                            SizedBox(width: 8),
+                                            Text("Yükleniyor...")
+                                          ],
+                                        ),
+                                      ),
+                                    );
+                                  }
+                                  if (snap.hasError) {
+                                    return InputDecorator(
+                                      decoration: const InputDecoration(
+                                        border: OutlineInputBorder(),
+                                        contentPadding: EdgeInsets.symmetric(horizontal: 12),
+                                        hintText: "Otopark seçin",
+                                        errorText: "Otopark listesi yüklenemedi",
+                                      ),
+                                      child: const SizedBox.shrink(),
+                                    );
+                                  }
+                                  final items = snap.data ?? [];
+                                  if (items.isEmpty) {
+                                    return InputDecorator(
+                                      decoration: const InputDecoration(
+                                        border: OutlineInputBorder(),
+                                        contentPadding: EdgeInsets.symmetric(horizontal: 12),
+                                        hintText: "Otopark seçin",
+                                        errorText: "Otopark listesi bulunamadı",
+                                      ),
+                                      child: const SizedBox.shrink(),
+                                    );
+                                  }
+                                  if (_lotIdByName.isEmpty) {
+                                    final map = <String, int>{};
+                                    for (final e in items) {
+                                      map[e.lotName] = e.parkingLotID;
+                                    }
+                                    WidgetsBinding.instance.addPostFrameCallback((_) {
+                                      if (mounted) setState(() => _lotIdByName = map);
+                                    });
+                                  }
+                                  return DropdownButtonFormField<int>(
+                                    isExpanded: true,
+                                    value: _selectedParkingLotId,
+                                    decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12), hintText: "Otopark seçin"),
+                                    items: items
+                                        .map((e) => DropdownMenuItem<int>(
+                                              value: e.parkingLotID,
+                                              child: Text(
+                                                e.lotName,
+                                                overflow: TextOverflow.ellipsis,
+                                              ),
+                                            ))
+                                        .toList(),
+                                    onChanged: (val) {
+                                      setState(() {
+                                        _selectedParkingLotId = val;
+                                        String? name;
+                                        for (final e in items) {
+                                          if (e.parkingLotID == val) {
+                                            name = e.lotName;
+                                            break;
+                                          }
+                                        }
+                                        _selectedParkingLotName = name;
+                                      });
+                                    },
+                                  );
+                                },
+                              ),
+                            ),
                     ],
                   );
                 },
@@ -105,128 +260,129 @@ class _ParkingLotsListScreenState extends State<ParkingLotsListScreen> {
             ),
             const SizedBox(height: 24),
 
-            // --- KART LİSTESİ ---
-            LayoutBuilder(
-              builder: (context, constraints) {
-                int crossAxisCount = constraints.maxWidth > 1100 ? 2 : 1; // Genişse 2 kolon
-                return GridView.builder(
-                  shrinkWrap: true,
-                  physics: const NeverScrollableScrollPhysics(),
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: crossAxisCount,
-                    crossAxisSpacing: 24,
-                    mainAxisSpacing: 24,
-                    childAspectRatio: 1.8,
-                  ),
-                  itemCount: _filteredLots.length,
-                  itemBuilder: (context, index) {
-                    final lot = _filteredLots[index];
-                    final double percentage = (lot['occupiedSpots'] / lot['totalSpots']) * 100;
-                    final color = _getOccupancyColor(percentage);
-
-                    return Container(
-                      padding: const EdgeInsets.all(24),
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: Colors.grey.shade200),
-                        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10)],
+            // --- KART LİSTESİ (GERÇEK VERİ) ---
+            FutureBuilder<List<ParkingLotOccupancy>>(
+              future: _lotsFuture,
+              builder: (context, snapshot) {
+                if (snapshot.connectionState == ConnectionState.waiting) {
+                  return const Center(child: Padding(padding: EdgeInsets.all(24), child: CircularProgressIndicator()));
+                }
+                if (snapshot.hasError) {
+                  return Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.red.shade200)),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text("Otopark verileri yüklenemedi", style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold)),
+                        const SizedBox(height: 8),
+                        Text(snapshot.error.toString(), style: TextStyle(color: Colors.grey.shade600, fontSize: 12)),
+                      ],
+                    ),
+                  );
+                }
+                final allLots = snapshot.data ?? [];
+                final filtered = _filterLots(allLots);
+                return LayoutBuilder(
+                  builder: (context, constraints) {
+                    int crossAxisCount = constraints.maxWidth > 1100 ? 2 : 1;
+                    return GridView.builder(
+                      shrinkWrap: true,
+                      physics: const NeverScrollableScrollPhysics(),
+                      gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                        crossAxisCount: crossAxisCount,
+                        crossAxisSpacing: 24,
+                        mainAxisSpacing: 24,
+                        childAspectRatio: 1.8,
                       ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Row(
+                      itemCount: filtered.length,
+                      itemBuilder: (context, index) {
+                        final lot = filtered[index];
+                        final percentage = lot.occupancyRate;
+                        final color = _getOccupancyColor(percentage);
+                        return Container(
+                          padding: const EdgeInsets.all(24),
+                          decoration: BoxDecoration(
+                            color: Colors.white,
+                            borderRadius: BorderRadius.circular(12),
+                            border: Border.all(color: Colors.grey.shade200),
+                            boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 10)],
+                          ),
+                          child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             mainAxisAlignment: MainAxisAlignment.spaceBetween,
                             children: [
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    Text(lot['lotName'], style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                                    const SizedBox(height: 4),
-                                    Text(lot['airportName'], style: TextStyle(fontSize: 14, color: Colors.grey.shade600)),
-                                  ],
-                                ),
-                              ),
-                              Container(
-                                padding: const EdgeInsets.all(12),
-                                decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(12)),
-                                child: Icon(Icons.local_parking, color: Colors.orange.shade700, size: 28),
-                              ),
-                            ],
-                          ),
-
-                          // Progress Bar
-                          Column(
-                            children: [
                               Row(
+                                crossAxisAlignment: CrossAxisAlignment.start,
                                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                                 children: [
-                                  const Text("Doluluk Oranı", style: TextStyle(color: Colors.grey)),
-                                  Text("${percentage.toInt()}%", style: TextStyle(fontWeight: FontWeight.bold, color: color)),
+                                  Expanded(
+                                    child: Column(
+                                      crossAxisAlignment: CrossAxisAlignment.start,
+                                      children: [
+                                        Text(lot.lotName, style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
+                                      ],
+                                    ),
+                                  ),
+                                  Container(
+                                    padding: const EdgeInsets.all(12),
+                                    decoration: BoxDecoration(color: Colors.orange.shade50, borderRadius: BorderRadius.circular(12)),
+                                    child: Icon(Icons.local_parking, color: Colors.orange.shade700, size: 28),
+                                  ),
                                 ],
                               ),
-                              const SizedBox(height: 8),
-                              ClipRRect(
-                                borderRadius: BorderRadius.circular(4),
-                                child: LinearProgressIndicator(
-                                  value: percentage / 100,
-                                  backgroundColor: Colors.grey.shade200,
-                                  valueColor: AlwaysStoppedAnimation<Color>(color),
-                                  minHeight: 10,
+                              Column(
+                                children: [
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: [
+                                      const Text("Doluluk Oranı", style: TextStyle(color: Colors.grey)),
+                                      Text("${percentage.toInt()}%", style: TextStyle(fontWeight: FontWeight.bold, color: color)),
+                                    ],
+                                  ),
+                                  const SizedBox(height: 8),
+                                  ClipRRect(
+                                    borderRadius: BorderRadius.circular(4),
+                                    child: LinearProgressIndicator(
+                                      value: percentage / 100,
+                                      backgroundColor: Colors.grey.shade200,
+                                      valueColor: AlwaysStoppedAnimation<Color>(color),
+                                      minHeight: 10,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Row(
+                                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                                    children: const [
+                                      Text("Dolu: —", style: TextStyle(fontSize: 12, color: Colors.grey)),
+                                      Text("Toplam: —", style: TextStyle(fontSize: 12, color: Colors.grey)),
+                                    ],
+                                  ),
+                                ],
+                              ),
+                              SizedBox(
+                                width: double.infinity,
+                                child: ElevatedButton.icon(
+                                  onPressed: () {
+                                    final id = _lotIdByName[lot.lotName];
+                                    if (id != null) {
+                                      context.go(Uri(path: '/parking/parking-lot-detail', queryParameters: {'parkingLotId': id.toString()}).toString());
+                                    }
+                                  },
+                                  style: ElevatedButton.styleFrom(
+                                    backgroundColor: Colors.orange.shade600,
+                                    foregroundColor: Colors.white,
+                                    padding: const EdgeInsets.symmetric(vertical: 12),
+                                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                                  ),
+                                  icon: const Icon(Icons.visibility),
+                                  label: const Text("Detayları Görüntüle"),
                                 ),
                               ),
-                              const SizedBox(height: 8),
-                              Row(
-                                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                                children: [
-                                  Text("Dolu: ${lot['occupiedSpots']}", style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                                  Text("Toplam: ${lot['totalSpots']}", style: const TextStyle(fontSize: 12, color: Colors.grey)),
-                                ],
-                              ),
                             ],
                           ),
-
-                          // Bloklar
-                          Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text("Bloklar", style: TextStyle(color: Colors.grey, fontSize: 13)),
-                              const SizedBox(height: 8),
-                              Wrap(
-                                spacing: 8,
-                                children: (lot['blocks'] as List<String>).map((block) => Container(
-                                  width: 36, height: 36,
-                                  alignment: Alignment.center,
-                                  decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(8)),
-                                  child: Text(block, style: TextStyle(color: Colors.grey.shade800, fontWeight: FontWeight.bold)),
-                                )).toList(),
-                              ),
-                            ],
-                          ),
-
-                          // Buton
-                          SizedBox(
-                            width: double.infinity,
-                            child: ElevatedButton.icon(
-                              onPressed: () {
-                                // Detay sayfasına git (Query Param ile)
-                                context.go(Uri(path: '/parking/parking-lot-detail', queryParameters: {'name': lot['lotName'], 'airport': lot['airportName']}).toString());
-                              },
-                              style: ElevatedButton.styleFrom(
-                                backgroundColor: Colors.orange.shade600,
-                                foregroundColor: Colors.white,
-                                padding: const EdgeInsets.symmetric(vertical: 12),
-                                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                              ),
-                              icon: const Icon(Icons.visibility),
-                              label: const Text("Detayları Görüntüle"),
-                            ),
-                          ),
-                        ],
-                      ),
+                        );
+                      },
                     );
                   },
                 );

@@ -198,9 +198,9 @@ final GoRouter appRouter = GoRouter(
         GoRoute(
           path: '/parking/parking-lot-detail',
           builder: (context, state) {
-            final name = state.uri.queryParameters['name'] ?? 'Otopark';
-            final airport = state.uri.queryParameters['airport'] ?? 'Havalimanı';
-            return ParkingLotDetailScreen(lotName: name, airportName: airport);
+            final idStr = state.uri.queryParameters['parkingLotId'];
+            final id = int.tryParse(idStr ?? '');
+            return ParkingLotDetailScreen(parkingLotId: id ?? 0);
           },
         ),
         GoRoute(path: '/parking/reservations', builder: (context, state) => const OpsRes.ParkingReservationsScreen()),
