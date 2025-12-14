@@ -1,6 +1,12 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
 import 'package:intl/intl.dart';
+import 'models/currently_parked_vehicle_model.dart';
+import 'services/currently_parked_api.dart';
+import 'models/exit_vehicle_model.dart';
+import 'services/recent_exits_api.dart';
+import 'models/exit_popup_info_model.dart';
+import 'services/parking_api_service.dart';
 
 class EntryExitScreen extends StatefulWidget {
   const EntryExitScreen({super.key});
@@ -11,6 +17,8 @@ class EntryExitScreen extends StatefulWidget {
 
 class _EntryExitScreenState extends State<EntryExitScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  Future<List<CurrentlyParkedVehicleModel>>? _parkedFuture;
+  Future<List<ExitVehicleModel>>? _recentExitsFuture;
 
   // --- MOCK VERİLER ---
   List<Map<String, dynamic>> _parkedVehicles = [
@@ -59,6 +67,30 @@ class _EntryExitScreenState extends State<EntryExitScreen> with SingleTickerProv
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _loadParked();
+    _loadRecentExits();
+  }
+
+  void _loadParked() {
+    setState(() {
+      _parkedFuture = CurrentlyParkedApi.fetchCurrentlyParked();
+    });
+  }
+
+  void _loadRecentExits() {
+    setState(() {
+      _recentExitsFuture = RecentExitsApi.fetchRecentExits(topN: 20);
+    });
+  }
+
+  String _formatTime(DateTime dt) {
+    final hh = dt.hour.toString().padLeft(2, '0');
+    final mm = dt.minute.toString().padLeft(2, '0');
+    return '$hh:$mm';
+  }
+
+  String _formatDateTime(DateTime dt) {
+    return DateFormat('yyyy-MM-dd HH:mm').format(dt);
   }
 
   // --- GİRİŞ İŞLEMİ ---
@@ -154,58 +186,169 @@ class _EntryExitScreenState extends State<EntryExitScreen> with SingleTickerProv
 
   // --- ÇIKIŞ İŞLEMİ (Hesaplama) ---
   void _showExitDialog(Map<String, dynamic> vehicle) {
-    // Süre Hesapla
-    final entryDate = DateFormat('yyyy-MM-dd HH:mm').parse(vehicle['entryTime']);
-    final now = DateTime.now();
-    final diff = now.difference(entryDate);
-    final hours = diff.inHours;
-    final minutes = diff.inMinutes % 60;
-    final durationText = "$hours saat $minutes dakika";
-    final amount = max(20, hours * 15.0).toDouble(); // Örnek fiyatlandırma
+    final plate = vehicle['plate'] as String;
+    Future<ExitPopupInfo> popupFuture = ParkingApiService.getExitPopupInfo(plate);
 
+    String? selectedPayment;
+
+    ExitPopupInfo? infoRef;
+    bool isCheckingOut = false;
+    String? checkoutError;
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Araç Çıkışı"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _InfoRow(label: "Plaka", value: vehicle['plate']),
-            _InfoRow(label: "Sahibi", value: vehicle['ownerName']),
-            _InfoRow(label: "Giriş Saati", value: vehicle['entryTime']),
-            const Divider(),
-            _InfoRow(label: "Kalış Süresi", value: durationText, isBold: true),
-            _InfoRow(label: "Ödeme Tutarı", value: "$amount ₺", isBold: true, valueColor: Colors.orange),
-            const SizedBox(height: 16),
-            const Text("Ödeme Yöntemi", style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Row(
+      builder: (context) => StatefulBuilder(
+        builder: (context, setStateDialog) {
+          return AlertDialog(
+            title: const Text("Araç Çıkışı"),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(child: OutlinedButton.icon(onPressed: (){}, icon: const Icon(Icons.money), label: const Text("Nakit"))),
-                const SizedBox(width: 8),
-                Expanded(child: OutlinedButton.icon(onPressed: (){}, icon: const Icon(Icons.credit_card), label: const Text("Kart"))),
+                FutureBuilder<ExitPopupInfo>(
+                  future: popupFuture,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 8.0),
+                        child: SizedBox(height: 24, width: 24, child: CircularProgressIndicator(strokeWidth: 2)),
+                      );
+                    }
+                    if (snapshot.hasError) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(snapshot.error.toString(), style: TextStyle(color: Colors.red.shade700)),
+                          const SizedBox(height: 8),
+                          ElevatedButton(
+                            onPressed: () {
+                              setStateDialog(() {
+                                popupFuture = ParkingApiService.getExitPopupInfo(plate);
+                              });
+                            },
+                            child: const Text("Tekrar Dene"),
+                          )
+                        ],
+                      );
+                    }
+                    final info = snapshot.data!;
+                    infoRef = info;
+                    final entryTimeStr = DateFormat('HH:mm').format(info.checkInTime);
+                    final mins = info.durationMinutes;
+                    final durStr = mins < 60
+                        ? "${mins}Ydk"
+                        : "${(mins ~/ 60)}s ${(mins % 60)}Ydk";
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _InfoRow(label: "Plaka", value: info.plateNumber),
+                        _InfoRow(label: "Sahibi", value: info.ownerName),
+                        _InfoRow(label: "Giriş Saati", value: entryTimeStr),
+                        const Divider(),
+                        _InfoRow(label: "Kalış Süresi", value: durStr, isBold: true),
+                        _InfoRow(label: "Ödeme Tutarı", value: "₺${info.amount.toStringAsFixed(2)}", isBold: true, valueColor: Colors.green),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 16),
+                const Text("Ödeme Yöntemi", style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                RadioListTile<String>(
+                  title: const Text("Nakit"),
+                  value: "Nakit",
+                  groupValue: selectedPayment,
+                  onChanged: (val) => setStateDialog(() => selectedPayment = val),
+                ),
+                RadioListTile<String>(
+                  title: const Text("Kart"),
+                  value: "Kart",
+                  groupValue: selectedPayment,
+                  onChanged: (val) => setStateDialog(() => selectedPayment = val),
+                ),
+                if (checkoutError != null) ...[
+                  const SizedBox(height: 8),
+                  Text(checkoutError!, style: TextStyle(color: Colors.red.shade700)),
+                  const SizedBox(height: 8),
+                  OutlinedButton(
+                    onPressed: () async {
+                      if (infoRef == null || selectedPayment == null) return;
+                      setStateDialog(() {
+                        checkoutError = null;
+                        isCheckingOut = true;
+                      });
+                      try {
+                        await ParkingApiService.checkoutVehicle(
+                          plateNumber: infoRef!.plateNumber,
+                          amount: infoRef!.amount,
+                          paymentMethod: selectedPayment!,
+                        );
+                        if (!context.mounted) return;
+                        Navigator.pop(context);
+                        _loadParked();
+                        _loadRecentExits();
+                      } catch (e) {
+                        setStateDialog(() {
+                          checkoutError = e.toString();
+                        });
+                      } finally {
+                        setStateDialog(() {
+                          isCheckingOut = false;
+                        });
+                      }
+                    },
+                    child: const Text("Tekrar Dene"),
+                  )
+                ]
               ],
-            )
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
-            onPressed: () {
-              setState(() {
-                _parkedVehicles.removeWhere((v) => v['id'] == vehicle['id']);
-                _recentExits.insert(0, {...vehicle, 'status': 'exited'});
-              });
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text("Çıkış işlemi tamamlandı"), backgroundColor: Colors.green),
-              );
-            },
-            child: const Text("Çıkış Yap"),
-          ),
-        ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+                onPressed: isCheckingOut
+                    ? null
+                    : () async {
+                        if (selectedPayment == null || infoRef == null) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text("Ödeme yöntemi ve bilgi yüklemesi gerekli"), backgroundColor: Colors.orange),
+                          );
+                          return;
+                        }
+                        setStateDialog(() {
+                          checkoutError = null;
+                          isCheckingOut = true;
+                        });
+                        try {
+                          await ParkingApiService.checkoutVehicle(
+                            plateNumber: infoRef!.plateNumber,
+                            amount: infoRef!.amount,
+                            paymentMethod: selectedPayment!,
+                          );
+                          if (!context.mounted) return;
+                          Navigator.pop(context);
+                          _loadParked();
+                          _loadRecentExits();
+                        } catch (e) {
+                          setStateDialog(() {
+                            checkoutError = e.toString();
+                          });
+                        } finally {
+                          setStateDialog(() {
+                            isCheckingOut = false;
+                          });
+                        }
+                      },
+                child: isCheckingOut
+                    ? const SizedBox(
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Text("Çıkış Yap"),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -268,16 +411,81 @@ class _EntryExitScreenState extends State<EntryExitScreen> with SingleTickerProv
                 controller: _tabController,
                 children: [
                   // 1. PARK HALİNDEKİLER
-                  _VehicleGrid(
-                      vehicles: _parkedVehicles,
-                      isParked: true,
-                      onAction: (v) => _showExitDialog(v)
+                  FutureBuilder<List<CurrentlyParkedVehicleModel>>(
+                    future: _parkedFuture,
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      if (snapshot.hasError) {
+                        return Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text('Veri alınamadı', style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 8),
+                            Text(snapshot.error.toString(), style: TextStyle(color: Colors.grey.shade600, fontSize: 12), textAlign: TextAlign.center),
+                            const SizedBox(height: 12),
+                            ElevatedButton(onPressed: _loadParked, child: const Text('Tekrar Dene')),
+                          ],
+                        );
+                      }
+                      final data = snapshot.data ?? [];
+                      final vehicles = data.map((e) {
+                        return {
+                          'id': '${e.plateNumber}-${e.checkInTime.toIso8601String()}',
+                          'plate': e.plateNumber,
+                          'vehicleType': e.vehicleType,
+                          'ownerName': e.ownerName,
+                          'entryTime': _formatDateTime(e.checkInTime),
+                          'spotNumber': e.spotCode,
+                          'parkingLotName': e.parkingLot,
+                          'status': 'parked',
+                        };
+                      }).toList();
+                      return _VehicleGrid(
+                        vehicles: vehicles,
+                        isParked: true,
+                        onAction: (v) => _showExitDialog(v),
+                      );
+                    },
                   ),
                   // 2. SON ÇIKIŞLAR
-                  _VehicleGrid(
-                      vehicles: _recentExits,
-                      isParked: false,
-                      onAction: (v) {} // Çıkış yapmış araca işlem yok
+                  FutureBuilder<List<ExitVehicleModel>>(
+                    future: _recentExitsFuture,
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      if (snapshot.hasError) {
+                        return Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text('Veri alınamadı', style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 8),
+                            Text(snapshot.error.toString(), style: TextStyle(color: Colors.grey.shade600, fontSize: 12), textAlign: TextAlign.center),
+                            const SizedBox(height: 12),
+                            ElevatedButton(onPressed: _loadRecentExits, child: const Text('Tekrar Dene')),
+                          ],
+                        );
+                      }
+                      final data = snapshot.data ?? [];
+                      final vehicles = data.map((e) {
+                        return {
+                          'id': '${e.plateNumber}-${(e.checkOutTime ?? DateTime.now()).toIso8601String()}',
+                          'plate': e.plateNumber,
+                          'vehicleType': e.vehicleType,
+                          'ownerName': e.ownerName,
+                          'entryTime': e.checkInTime != null ? _formatDateTime(e.checkInTime!) : '',
+                          'parkingLotName': e.parkingLot,
+                          'status': 'exited',
+                        };
+                      }).toList();
+                      return _VehicleGrid(
+                        vehicles: vehicles,
+                        isParked: false,
+                        onAction: (v) {},
+                      );
+                    },
                   ),
                 ],
               ),
