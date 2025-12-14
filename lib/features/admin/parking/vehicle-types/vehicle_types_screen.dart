@@ -44,8 +44,11 @@ class _VehicleTypesScreenState extends State<VehicleTypesScreen> {
   // --- CRUD İŞLEMLERİ ---
 
   void _showTypeDialog({Map<String, dynamic>? type}) {
-    if (type != null) {
-      _typeNameController.text = type['typeName'];
+    // Düzenleme modunda olup olmadığımızı kontrol eden değişken
+    final bool isEditing = type != null;
+
+    if (isEditing) {
+      _typeNameController.text = type!['typeName'];
       _multiplierController.text = type['priceMultiplier'].toString();
     } else {
       _typeNameController.clear();
@@ -56,7 +59,7 @@ class _VehicleTypesScreenState extends State<VehicleTypesScreen> {
       context: context,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(type != null ? 'Araç Tipi Düzenle' : 'Yeni Araç Tipi'),
+        title: Text(isEditing ? 'Araç Tipi Düzenle' : 'Yeni Araç Tipi'),
         content: SizedBox(
           width: 400,
           child: SingleChildScrollView(
@@ -65,17 +68,26 @@ class _VehicleTypesScreenState extends State<VehicleTypesScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // --- ARAÇ TİPİ (DÜZENLEME MODUNDA KİLİTLİ) ---
                   TextFormField(
                     controller: _typeNameController,
-                    decoration: const InputDecoration(
-                        labelText: "Araç Tipi",
-                        border: OutlineInputBorder(),
-                        prefixIcon: Icon(Icons.directions_car),
-                        hintText: "Örn: Otomobil"
+                    // Eğer düzenleme yapılıyorsa (isEditing == true) sadece okunur olsun
+                    readOnly: isEditing,
+                    decoration: InputDecoration(
+                      labelText: "Araç Tipi",
+                      border: const OutlineInputBorder(),
+                      prefixIcon: const Icon(Icons.directions_car),
+                      hintText: "Örn: Otomobil",
+                      // Kilitli olduğunu hissettirmek için gri arka plan ekleyelim
+                      filled: isEditing,
+                      fillColor: isEditing ? Colors.grey.shade200 : null,
                     ),
                     validator: (v) => v!.isEmpty ? "Zorunlu alan" : null,
                   ),
+                  
                   const SizedBox(height: 16),
+                  
+                  // --- FİYAT ÇARPANI (HER ZAMAN DÜZENLENEBİLİR) ---
                   TextFormField(
                     controller: _multiplierController,
                     decoration: const InputDecoration(
@@ -102,20 +114,22 @@ class _VehicleTypesScreenState extends State<VehicleTypesScreen> {
             child: const Text("İptal", style: TextStyle(color: Colors.grey)),
           ),
           ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
+            style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.teal, foregroundColor: Colors.white),
             onPressed: () {
               if (_formKey.currentState!.validate()) {
                 setState(() {
-                  if (type != null) {
-                    // Güncelle
-                    final index = _vehicleTypes.indexWhere((t) => t['typeID'] == type['typeID']);
+                  if (isEditing) {
+                    // Güncelleme İşlemi
+                    final index = _vehicleTypes
+                        .indexWhere((t) => t['typeID'] == type!['typeID']);
                     _vehicleTypes[index] = {
-                      'typeID': type['typeID'],
-                      'typeName': _typeNameController.text,
+                      'typeID': type!['typeID'],
+                      'typeName': _typeNameController.text, // Değişmese bile controller'dan alabiliriz
                       'priceMultiplier': double.parse(_multiplierController.text),
                     };
                   } else {
-                    // Ekle
+                    // Ekleme İşlemi
                     _vehicleTypes.insert(0, {
                       'typeID': DateTime.now().millisecondsSinceEpoch,
                       'typeName': _typeNameController.text,
@@ -126,7 +140,7 @@ class _VehicleTypesScreenState extends State<VehicleTypesScreen> {
                 Navigator.pop(context);
               }
             },
-            child: Text(type != null ? "Güncelle" : "Ekle"),
+            child: Text(isEditing ? "Güncelle" : "Ekle"),
           ),
         ],
       ),

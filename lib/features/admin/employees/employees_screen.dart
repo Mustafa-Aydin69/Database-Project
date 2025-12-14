@@ -17,65 +17,90 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _firstNameController = TextEditingController();
   final TextEditingController _lastNameController = TextEditingController();
-  final TextEditingController _emailController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _deptController = TextEditingController();
   final TextEditingController _posController = TextEditingController();
-  final TextEditingController _hireDateController = TextEditingController();
+  // Email ve Tarih silindi, Maaş eklendi:
+  final TextEditingController _salaryController = TextEditingController();
 
-  // --- MOCK VERİLER (React'ten alındı) ---
+  // --- MOCK VERİLER ---
   List<Map<String, dynamic>> _employees = [
-    {'id': 1, 'firstName': 'Ahmet', 'lastName': 'Yılmaz', 'email': 'ahmet.yilmaz@airport.com', 'phone': '+90 532 123 4567', 'department': 'Uçuş Operasyonları', 'position': 'Operasyon Müdürü', 'hireDate': '2020-01-15'},
-    {'id': 2, 'firstName': 'Ayşe', 'lastName': 'Demir', 'email': 'ayse.demir@airport.com', 'phone': '+90 533 234 5678', 'department': 'Yer Hizmetleri', 'position': 'Yer Hizmetleri Müdürü', 'hireDate': '2019-03-20'},
-    {'id': 3, 'firstName': 'Mehmet', 'lastName': 'Kaya', 'email': 'mehmet.kaya@airport.com', 'phone': '+90 534 345 6789', 'department': 'Teknik Bakım', 'position': 'Bakım Mühendisi', 'hireDate': '2021-06-10'},
-    {'id': 4, 'firstName': 'Fatma', 'lastName': 'Şahin', 'email': 'fatma.sahin@airport.com', 'phone': '+90 535 456 7890', 'department': 'Güvenlik', 'position': 'Güvenlik Şefi', 'hireDate': '2018-09-05'},
-    {'id': 5, 'firstName': 'Ali', 'lastName': 'Öztürk', 'email': 'ali.ozturk@airport.com', 'phone': '+90 536 567 8901', 'department': 'Müşteri Hizmetleri', 'position': 'Müşteri Temsilcisi', 'hireDate': '2022-02-28'},
+    {
+      'id': 1, 
+      'firstName': 'Ahmet', 
+      'lastName': 'Yılmaz', 
+      'phone': '+90 532 123 4567', 
+      'department': 'Uçuş Operasyonları', 
+      'position': 'Operasyon Müdürü', 
+      'salary': 45000 // Maaş eklendi
+    },
+    {
+      'id': 2, 
+      'firstName': 'Ayşe', 
+      'lastName': 'Demir', 
+      'phone': '+90 533 234 5678', 
+      'department': 'Yer Hizmetleri', 
+      'position': 'Yer Hizmetleri Müdürü', 
+      'salary': 38000
+    },
+    {
+      'id': 3, 
+      'firstName': 'Mehmet', 
+      'lastName': 'Kaya', 
+      'phone': '+90 534 345 6789', 
+      'department': 'Teknik Bakım', 
+      'position': 'Bakım Mühendisi', 
+      'salary': 42000
+    },
+    {
+      'id': 4, 
+      'firstName': 'Fatma', 
+      'lastName': 'Şahin', 
+      'phone': '+90 535 456 7890', 
+      'department': 'Güvenlik', 
+      'position': 'Güvenlik Şefi', 
+      'salary': 32000
+    },
+    {
+      'id': 5, 
+      'firstName': 'Ali', 
+      'lastName': 'Öztürk', 
+      'phone': '+90 536 567 8901', 
+      'department': 'Müşteri Hizmetleri', 
+      'position': 'Müşteri Temsilcisi', 
+      'salary': 28500
+    },
     // Sayfalama için veri çoğaltma
     ...List.generate(15, (index) => {
       'id': 6 + index,
       'firstName': 'Personel',
       'lastName': '${index + 1}',
-      'email': 'personel${index + 1}@airport.com',
       'phone': '+90 555 000 ${1000 + index}',
       'department': index % 2 == 0 ? 'Yer Hizmetleri' : 'Teknik Bakım',
       'position': 'Uzman',
-      'hireDate': '2023-01-${10 + index}'
+      'salary': 25000 + (index * 500) // Dinamik maaş
     }),
   ];
 
   // --- CRUD İŞLEMLERİ ---
 
-  Future<void> _selectDate(BuildContext context) async {
-    final DateTime? picked = await showDatePicker(
-      context: context,
-      initialDate: DateTime.now(),
-      firstDate: DateTime(2000),
-      lastDate: DateTime.now(),
-    );
-    if (picked != null) {
-      setState(() {
-        _hireDateController.text = "${picked.year}-${picked.month.toString().padLeft(2, '0')}-${picked.day.toString().padLeft(2, '0')}";
-      });
-    }
-  }
-
   void _showEmployeeDialog({Map<String, dynamic>? employee}) {
     if (employee != null) {
       _firstNameController.text = employee['firstName'];
       _lastNameController.text = employee['lastName'];
-      _emailController.text = employee['email'];
+      // Email ve Tarih setleme kaldırıldı
       _phoneController.text = employee['phone'];
       _deptController.text = employee['department'];
       _posController.text = employee['position'];
-      _hireDateController.text = employee['hireDate'];
+      _salaryController.text = employee['salary'].toString(); // Maaş setlendi
     } else {
       _firstNameController.clear();
       _lastNameController.clear();
-      _emailController.clear();
+      // Email ve Tarih clear kaldırıldı
       _phoneController.clear();
       _deptController.clear();
       _posController.clear();
-      _hireDateController.clear();
+      _salaryController.clear(); // Maaş temizlendi
     }
 
     showDialog(
@@ -111,12 +136,7 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _emailController,
-                    decoration: const InputDecoration(labelText: "E-posta", border: OutlineInputBorder(), prefixIcon: Icon(Icons.email)),
-                    validator: (v) => v!.isEmpty ? "Zorunlu" : null,
-                  ),
-                  const SizedBox(height: 16),
+                  // Email Alanı Kaldırıldı
                   TextFormField(
                     controller: _phoneController,
                     decoration: const InputDecoration(labelText: "Telefon", border: OutlineInputBorder(), prefixIcon: Icon(Icons.phone)),
@@ -135,12 +155,23 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
                     validator: (v) => v!.isEmpty ? "Zorunlu" : null,
                   ),
                   const SizedBox(height: 16),
+                  // İşe Giriş Tarihi Kaldırıldı
+                  
+                  // YENİ MAAŞ ALANI EKLENDİ
                   TextFormField(
-                    controller: _hireDateController,
-                    readOnly: true,
-                    onTap: () => _selectDate(context),
-                    decoration: const InputDecoration(labelText: "İşe Giriş Tarihi", border: OutlineInputBorder(), prefixIcon: Icon(Icons.calendar_today)),
-                    validator: (v) => v!.isEmpty ? "Zorunlu" : null,
+                    controller: _salaryController,
+                    decoration: const InputDecoration(
+                      labelText: "Maaş (₺)", 
+                      border: OutlineInputBorder(), 
+                      prefixIcon: Icon(Icons.monetization_on)
+                    ),
+                    keyboardType: TextInputType.number, // Sadece sayısal klavye
+                    validator: (v) {
+                      if (v == null || v.isEmpty) return "Zorunlu";
+                      if (double.tryParse(v) == null) return "Geçerli bir sayı giriniz";
+                      if (double.parse(v) < 0) return "Negatif olamaz";
+                      return null;
+                    },
                   ),
                 ],
               ),
@@ -160,22 +191,22 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
                       'id': employee['id'],
                       'firstName': _firstNameController.text,
                       'lastName': _lastNameController.text,
-                      'email': _emailController.text,
+                      // Email ve Tarih kaydetme kaldırıldı
                       'phone': _phoneController.text,
                       'department': _deptController.text,
                       'position': _posController.text,
-                      'hireDate': _hireDateController.text,
+                      'salary': int.parse(_salaryController.text), // Maaş integer olarak kaydediliyor
                     };
                   } else {
                     _employees.insert(0, {
                       'id': DateTime.now().millisecondsSinceEpoch,
                       'firstName': _firstNameController.text,
                       'lastName': _lastNameController.text,
-                      'email': _emailController.text,
+                      // Email ve Tarih kaydetme kaldırıldı
                       'phone': _phoneController.text,
                       'department': _deptController.text,
                       'position': _posController.text,
-                      'hireDate': _hireDateController.text,
+                      'salary': int.parse(_salaryController.text), // Maaş kaydediliyor
                     });
                   }
                 });
@@ -265,7 +296,7 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
                       crossAxisCount: crossAxisCount,
                       crossAxisSpacing: 16,
                       mainAxisSpacing: 16,
-                      childAspectRatio: 1.6, // Kart boyutu
+                      childAspectRatio: 1.8, // Kart boyutu biraz genişletildi
                     ),
                     itemCount: currentData.length,
                     itemBuilder: (context, index) {
@@ -340,11 +371,11 @@ class _EmployeeCard extends StatelessWidget {
 
           _InfoItem(icon: Icons.business, text: employee['department']),
           const SizedBox(height: 4),
-          _InfoItem(icon: Icons.email_outlined, text: employee['email']),
-          const SizedBox(height: 4),
+          // Email Kaldırıldı
           _InfoItem(icon: Icons.phone_outlined, text: employee['phone']),
           const SizedBox(height: 4),
-          _InfoItem(icon: Icons.calendar_today, text: "Giriş: ${employee['hireDate']}"),
+          // Giriş Tarihi Kaldırıldı, yerine Maaş Eklendi
+          _InfoItem(icon: Icons.monetization_on, text: "Maaş: ${employee['salary']} ₺"),
 
           const SizedBox(height: 8),
 

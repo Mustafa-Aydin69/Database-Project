@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
+import '../../../core/services/checkin_service.dart';
 
 class CheckInPassengersScreen extends StatefulWidget {
   const CheckInPassengersScreen({super.key});
@@ -10,68 +11,58 @@ class CheckInPassengersScreen extends StatefulWidget {
 
 class _CheckInPassengersScreenState extends State<CheckInPassengersScreen> {
   // --- STATE ---
+  final CheckInService _checkInService = CheckInService();
+  bool _isLoading = true;
+  List<CheckInPassenger> _passengers = [];
   int _currentPage = 0;
   final int _itemsPerPage = 10;
   String _searchTerm = "";
 
-  // --- MOCK VERİLER ---
-  List<Map<String, dynamic>> _passengers = [
-    {
-      'id': 'P001', 'name': 'Ahmet Yılmaz', 'passport': 'U12345678', 'nationality': 'Türkiye',
-      'dateOfBirth': '1985-05-15', 'gender': 'Erkek', 'email': 'ahmet.yilmaz@email.com',
-      'phone': '+90 532 123 4567', 'flight': 'TK101 - IST → AYT', 'seat': '12A', 'checkInStatus': 'Bekliyor'
-    },
-    {
-      'id': 'P002', 'name': 'Ayşe Demir', 'passport': 'U23456789', 'nationality': 'Türkiye',
-      'dateOfBirth': '1990-08-22', 'gender': 'Kadın', 'email': 'ayse.demir@email.com',
-      'phone': '+90 533 234 5678', 'flight': 'TK205 - IST → ADB', 'seat': '8C', 'checkInStatus': 'Tamamlandı'
-    },
-    {
-      'id': 'P003', 'name': 'Mehmet Kaya', 'passport': 'U34567890', 'nationality': 'Türkiye',
-      'dateOfBirth': '1978-12-10', 'gender': 'Erkek', 'email': 'mehmet.kaya@email.com',
-      'phone': '+90 534 345 6789', 'flight': 'TK301 - IST → ESB', 'seat': '15B', 'checkInStatus': 'Bekliyor'
-    },
-    {
-      'id': 'P004', 'name': 'Fatma Şahin', 'passport': 'U45678901', 'nationality': 'Türkiye',
-      'dateOfBirth': '1995-03-18', 'gender': 'Kadın', 'email': 'fatma.sahin@email.com',
-      'phone': '+90 535 456 7890', 'flight': 'TK101 - IST → AYT', 'seat': '20D', 'checkInStatus': 'Tamamlandı'
-    },
-    // Sayfalama için veri üretelim
-    ...List.generate(15, (index) => {
-      'id': 'P${100 + index}',
-      'name': 'Yolcu ${index + 1}',
-      'passport': 'X${89000 + index}',
-      'nationality': index % 3 == 0 ? 'Almanya' : 'Türkiye',
-      'dateOfBirth': '199${index % 9}-01-01',
-      'gender': index % 2 == 0 ? 'Erkek' : 'Kadın',
-      'email': 'yolcu${index + 1}@mail.com',
-      'phone': '+90 555 000 ${1000 + index}',
-      'flight': 'TK${100 + (index % 5)} - IST → LHR',
-      'seat': '${index + 1}F',
-      'checkInStatus': index % 2 == 0 ? 'Bekliyor' : 'Tamamlandı'
-    }),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _loadPassengers();
+  }
+
+  /// API'den yolcu listesini yükle
+  Future<void> _loadPassengers() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    final passengers = await _checkInService.getPassengerDetailList();
+
+    setState(() {
+      _passengers = passengers;
+      _isLoading = false;
+    });
+  }
+
+  // --- MOCK VERİLER (KALDIRILDI) ---
+  // Artık API'den gelen veriler kullanılıyor
 
   // --- FİLTRELEME ---
-  List<Map<String, dynamic>> get _filteredPassengers {
+  List<CheckInPassenger> get _filteredPassengers {
     return _passengers.where((p) {
-      return p['name'].toString().toLowerCase().contains(_searchTerm.toLowerCase()) ||
-          p['passport'].toString().toLowerCase().contains(_searchTerm.toLowerCase()) ||
-          p['flight'].toString().toLowerCase().contains(_searchTerm.toLowerCase());
+      return p.fullName.toLowerCase().contains(_searchTerm.toLowerCase()) ||
+          p.passportNo.toLowerCase().contains(_searchTerm.toLowerCase()) ||
+          p.email.toLowerCase().contains(_searchTerm.toLowerCase()) ||
+          p.phone.toLowerCase().contains(_searchTerm.toLowerCase());
     }).toList();
   }
 
   // --- DETAY MODALI ---
-  void _showDetailDialog(Map<String, dynamic> passenger) {
+  void _showDetailDialog(CheckInPassenger passenger) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      useRootNavigator: true,
+      builder: (dialogContext) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Row(
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
             const Text("Yolcu Detayları"),
-            IconButton(onPressed: () => Navigator.pop(context), icon: const Icon(Icons.close)),
+            IconButton(onPressed: () => Navigator.pop(dialogContext), icon: const Icon(Icons.close)),
           ],
         ),
         content: SizedBox(
@@ -83,9 +74,9 @@ class _CheckInPassengersScreenState extends State<CheckInPassengersScreen> {
                 _SectionHeader(title: "Kişisel Bilgiler", icon: Icons.person),
                 const SizedBox(height: 12),
                 _InfoGrid(items: [
-                  {'label': 'Ad Soyad', 'value': passenger['name']},
-                  {'label': 'Doğum Tarihi', 'value': passenger['dateOfBirth']},
-                  {'label': 'Cinsiyet', 'value': passenger['gender']},
+                  {'label': 'Ad Soyad', 'value': passenger.fullName},
+                  {'label': 'Yaş', 'value': passenger.age?.toString() ?? '-'},
+                  {'label': 'Cinsiyet', 'value': passenger.gender},
                 ]),
 
                 const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Divider()),
@@ -93,8 +84,8 @@ class _CheckInPassengersScreenState extends State<CheckInPassengersScreen> {
                 _SectionHeader(title: "Pasaport Bilgileri", icon: Icons.book),
                 const SizedBox(height: 12),
                 _InfoGrid(items: [
-                  {'label': 'Pasaport No', 'value': passenger['passport']},
-                  {'label': 'Uyruk', 'value': passenger['nationality']},
+                  {'label': 'Pasaport No', 'value': passenger.passportNo},
+                  {'label': 'Uyruk', 'value': passenger.nationality},
                 ]),
 
                 const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Divider()),
@@ -102,8 +93,8 @@ class _CheckInPassengersScreenState extends State<CheckInPassengersScreen> {
                 _SectionHeader(title: "İletişim Bilgileri", icon: Icons.contact_phone),
                 const SizedBox(height: 12),
                 _InfoGrid(items: [
-                  {'label': 'Email', 'value': passenger['email']},
-                  {'label': 'Telefon', 'value': passenger['phone']},
+                  {'label': 'Email', 'value': passenger.email},
+                  {'label': 'Telefon', 'value': passenger.phone},
                 ]),
 
                 const Padding(padding: EdgeInsets.symmetric(vertical: 16), child: Divider()),
@@ -111,9 +102,11 @@ class _CheckInPassengersScreenState extends State<CheckInPassengersScreen> {
                 _SectionHeader(title: "Uçuş Bilgileri", icon: Icons.flight_takeoff),
                 const SizedBox(height: 12),
                 _InfoGrid(items: [
-                  {'label': 'Uçuş', 'value': passenger['flight']},
-                  {'label': 'Koltuk No', 'value': passenger['seat']},
-                  {'label': 'Durum', 'value': passenger['checkInStatus']},
+                  {'label': 'Rezervasyon No', 'value': passenger.reservationNo},
+                  {'label': 'Uçuş No', 'value': passenger.flightNo},
+                  {'label': 'Rota', 'value': passenger.route},
+                  {'label': 'Koltuk No', 'value': passenger.seatNumber},
+                  {'label': 'Durum', 'value': passenger.status},
                 ]),
               ],
             ),
@@ -124,7 +117,7 @@ class _CheckInPassengersScreenState extends State<CheckInPassengersScreen> {
             width: double.infinity,
             child: ElevatedButton(
               style: ElevatedButton.styleFrom(backgroundColor: Colors.grey.shade200, foregroundColor: Colors.black87),
-              onPressed: () => Navigator.pop(context),
+              onPressed: () => Navigator.pop(dialogContext),
               child: const Text("Kapat"),
             ),
           ),
@@ -190,8 +183,25 @@ class _CheckInPassengersScreenState extends State<CheckInPassengersScreen> {
             const SizedBox(height: 24),
 
             // --- KART LİSTESİ ---
-            if (currentData.isEmpty)
-              const Center(child: Padding(padding: EdgeInsets.all(40), child: Text("Yolcu bulunamadı.")))
+            if (_isLoading)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(40),
+                  child: CircularProgressIndicator(),
+                ),
+              )
+            else if (currentData.isEmpty)
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(40),
+                  child: Text(
+                    _passengers.isEmpty
+                        ? "Yolcu bulunamadı."
+                        : "Arama kriterlerinize uygun yolcu bulunamadı.",
+                    style: TextStyle(color: Colors.grey.shade600),
+                  ),
+                ),
+              )
             else
               LayoutBuilder(
                 builder: (context, constraints) {
@@ -209,7 +219,7 @@ class _CheckInPassengersScreenState extends State<CheckInPassengersScreen> {
                     itemBuilder: (context, index) {
                       return _PassengerCard(
                         passenger: currentData[index],
-                        initials: _getInitials(currentData[index]['name']),
+                        initials: _getInitials(currentData[index].fullName),
                         onDetail: () => _showDetailDialog(currentData[index]),
                       );
                     },
@@ -237,7 +247,7 @@ class _CheckInPassengersScreenState extends State<CheckInPassengersScreen> {
 
 // --- YOLCU KARTI ---
 class _PassengerCard extends StatelessWidget {
-  final Map<String, dynamic> passenger;
+  final CheckInPassenger passenger;
   final String initials;
   final VoidCallback onDetail;
 
@@ -268,8 +278,8 @@ class _PassengerCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(passenger['name'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), overflow: TextOverflow.ellipsis),
-                    Text(passenger['passport'], style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+                    Text(passenger.fullName, style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), overflow: TextOverflow.ellipsis),
+                    Text(passenger.passportNo, style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
                   ],
                 ),
               ),
@@ -278,11 +288,11 @@ class _PassengerCard extends StatelessWidget {
 
           const Divider(height: 16),
 
-          _CardInfoRow(icon: Icons.public, text: passenger['nationality']),
+          _CardInfoRow(icon: Icons.public, text: passenger.nationality),
           const SizedBox(height: 4),
-          _CardInfoRow(icon: Icons.email_outlined, text: passenger['email']),
+          _CardInfoRow(icon: Icons.email_outlined, text: passenger.email),
           const SizedBox(height: 4),
-          _CardInfoRow(icon: Icons.phone, text: passenger['phone']),
+          _CardInfoRow(icon: Icons.phone, text: passenger.phone),
 
           const SizedBox(height: 8),
 

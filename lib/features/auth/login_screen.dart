@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
+import '../../core/services/auth_service.dart'; // UserRole enum'unun burada tanımlı olduğu varsayılır
 
 class LoginScreen extends StatefulWidget {
   const LoginScreen({super.key});
@@ -9,11 +10,8 @@ class LoginScreen extends StatefulWidget {
 }
 
 class _LoginScreenState extends State<LoginScreen> {
-  // Form verilerini tutmak için Controller'lar (React'teki useState gibi)
   final TextEditingController _emailController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
-
-  // State değişkenleri
   bool _rememberMe = false;
   bool _isLoading = false;
   String? _errorMessage;
@@ -25,9 +23,9 @@ class _LoginScreenState extends State<LoginScreen> {
     super.dispose();
   }
 
-  // Giriş Mantığı (React'teki handleLogin fonksiyonu)
+  
+  // Kullanıcı doğrulama işlemi
   Future<void> _handleLogin() async {
-    // Klavye açıksa kapatalım
     FocusScope.of(context).unfocus();
 
     setState(() {
@@ -35,39 +33,147 @@ class _LoginScreenState extends State<LoginScreen> {
       _errorMessage = null;
     });
 
-    // API gecikmesi simülasyonu (setTimeout)
-    await Future.delayed(const Duration(seconds: 1));
-
     final email = _emailController.text.trim();
     final password = _passwordController.text;
 
-    if (!mounted) return; // Ekran kapandıysa işlem yapma
+    if (!mounted) return;
 
-    // 1. Admin Girişi
-    if (email == 'admin@gmail.com' && password == 'admin') {
-      // LocalStorage işlemleri buraya (SharedPrefs) eklenebilir
-      context.go('/admin/dashboard');
-    }
-    // 2. Kontuar (Check-in) Girişi
-    else if (email == 'mustafa@gmail.com' && password == '1234') {
-      context.go('/checkin/dashboard');
-    }
-    // 3. Otopark Girişi
-    else if (email == 'park@gmail.com' && password == '1234') {
-      context.go('/parking/dashboard');
-    }
-    // Hatalı Giriş
-    else {
+    try {
+      // API üzerinden giriş yap
+      final authService = AuthService();
+      final response = await authService.authenticate(
+        email: email,
+        password: password,
+      );
+
+      if (response != null && response['success'] == true) {
+        // Giriş başarılı - RoleName'e göre role belirleme
+        final roleName = response['data']['roleName'] as String? ?? '';
+        print('🔍 Flutter Debug - RoleName from API: "$roleName"');
+        print('🔍 Flutter Debug - RoleName type: ${roleName.runtimeType}');
+        print('🔍 Flutter Debug - RoleName isEmpty: ${roleName.isEmpty}');
+        
+        // RoleName boşsa hata ver
+        if (roleName.isEmpty) {
+          setState(() {
+            _errorMessage = 'Kullanıcı rolü bulunamadı';
+          });
+          return;
+        }
+        
+        // RoleName'e göre UserRole belirleme
+        UserRole userRole = _mapRoleNameToUserRole(roleName);
+        print('🔍 Flutter Debug - Mapped UserRole: $userRole');
+
+        // UserID'yi al
+        final userId = response['data']['userId'] as int?;
+        print('🔍 Flutter Debug - UserID: $userId');
+
+        // Kullanıcıyı giriş yapmış olarak kaydediyoruz (UserID ile birlikte)
+        authService.login(userRole, userId: userId);
+
+        // Yönlendirme işlemi - Her rol için yetkisine göre yönlendir
+        switch (userRole) {
+          case UserRole.admin:
+            // Admin: Her yere erişebilir, admin dashboard'a yönlendir
+            context.go('/admin/dashboard');
+            break;
+          
+          case UserRole.airportManager:
+            // Airport Manager: Kullanıcı, Uçuş, Rezervasyon, Çalışanlar + Dashboard
+            context.go('/admin/dashboard');
+            break;
+          
+          case UserRole.flightManager:
+            // Flight Manager: Havayolu, Havalimanı, Gate, Flights, Flight Crew + Dashboard
+            context.go('/admin/dashboard');
+            break;
+          
+          case UserRole.parkingManager:
+            // Parking Manager: Otopark Yönetimi + Dashboard
+            context.go('/admin/dashboard');
+            break;
+          
+          case UserRole.checkInStaff:
+            // Check-In Staff: Sadece Check-in Modülü
+            context.go('/checkin/dashboard');
+            break;
+          
+          case UserRole.parkingStaff:
+            // Parking Staff: Sadece Operasyonel Parking Modülü
+            context.go('/parking/dashboard');
+            break;
+          
+          case UserRole.user:
+            // Customer: Müşteri paneline yönlendir
+            context.go('/customer/dashboard');
+            break;
+        }
+      } else {
+        // Giriş başarısız
+        setState(() {
+          _errorMessage = response?['message'] ?? 'Kullanıcı adı veya şifre yanlış';
+        });
+      }
+    } catch (e) {
       setState(() {
-        _errorMessage = 'Email veya şifre hatalı';
-        _isLoading = false;
+        _errorMessage = 'Beklenmedik bir hata oluştu: ${e.toString()}';
       });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    }
+  }
+  
+
+  // RoleName'e göre UserRole enum'una dönüştürme fonksiyonu
+  UserRole _mapRoleNameToUserRole(String roleName) {
+    // RoleName'i normalize et (trim ve küçük harfe çevir)
+    final normalizedRoleName = roleName.trim();
+    
+    print('🔍 Mapping RoleName: "$roleName" -> normalized: "$normalizedRoleName"');
+    
+    // RoleName'e göre role belirleme
+    switch (normalizedRoleName) {
+      case 'Admin':
+        print('✅ Matched: Admin');
+        return UserRole.admin;
+      
+      case 'AirportManager':
+        print('✅ Matched: AirportManager');
+        return UserRole.airportManager;
+      
+      case 'FlightManager':
+        print('✅ Matched: FlightManager');
+        return UserRole.flightManager;
+      
+      case 'CheckInStaff':
+        print('✅ Matched: CheckInStaff');
+        return UserRole.checkInStaff;
+      
+      case 'ParkingManager':
+        print('✅ Matched: ParkingManager');
+        return UserRole.parkingManager;
+      
+      case 'ParkingStaff':
+        print('✅ Matched: ParkingStaff');
+        return UserRole.parkingStaff;
+      
+      case 'Customer':
+        print('✅ Matched: Customer (mapped to user)');
+        return UserRole.user; // Customer için user rolü kullanılıyor
+      
+      default:
+        print('❌ Unknown RoleName: "$roleName"');
+        return UserRole.user;
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    // React: bg-gradient-to-br from-teal-50 via-white to-orange-50
     return Scaffold(
       body: Container(
         decoration: const BoxDecoration(
@@ -85,29 +191,34 @@ class _LoginScreenState extends State<LoginScreen> {
           child: SingleChildScrollView(
             padding: const EdgeInsets.all(24.0),
             child: ConstrainedBox(
-              // React: max-w-md (Maksimum genişlik sınırlaması)
               constraints: const BoxConstraints(maxWidth: 450),
               child: Card(
-                elevation: 10, // React: shadow-xl
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)), // React: rounded-2xl
+                elevation: 10,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(16),
+                ),
                 color: Colors.white,
                 child: Padding(
-                  padding: const EdgeInsets.all(32.0), // React: p-8
+                  padding: const EdgeInsets.all(32.0),
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     crossAxisAlignment: CrossAxisAlignment.stretch,
                     children: [
-                      // --- HEADER KISMI ---
                       Center(
                         child: Container(
-                          width: 64, height: 64,
+                          width: 64,
+                          height: 64,
                           decoration: BoxDecoration(
                             gradient: const LinearGradient(
-                              colors: [Colors.teal, Color(0xFF0D9488)], // teal-500 to teal-600
+                              colors: [Colors.teal, Color(0xFF0D9488)],
                             ),
                             borderRadius: BorderRadius.circular(16),
                           ),
-                          child: const Icon(Icons.flight, color: Colors.white, size: 32),
+                          child: const Icon(
+                            Icons.flight,
+                            color: Colors.white,
+                            size: 32,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 16),
@@ -128,104 +239,119 @@ class _LoginScreenState extends State<LoginScreen> {
                       ),
                       const SizedBox(height: 32),
 
-                      // --- HATA MESAJI (Varsa göster) ---
                       if (_errorMessage != null)
                         Container(
                           margin: const EdgeInsets.only(bottom: 20),
                           padding: const EdgeInsets.all(12),
                           decoration: BoxDecoration(
-                            color: const Color(0xFFFEF2F2), // red-50
-                            border: Border.all(color: const Color(0xFFFECACA)), // red-200
+                            color: const Color(0xFFFEF2F2),
+                            border: Border.all(color: const Color(0xFFFECACA)),
                             borderRadius: BorderRadius.circular(8),
                           ),
                           child: Row(
                             children: [
-                              const Icon(Icons.error_outline, color: Colors.red, size: 20),
+                              const Icon(
+                                Icons.error_outline,
+                                color: Colors.red,
+                                size: 20,
+                              ),
                               const SizedBox(width: 8),
-                              Text(_errorMessage!, style: const TextStyle(color: Colors.red, fontSize: 13)),
+                              Expanded(
+                                child: Text(
+                                  _errorMessage!,
+                                  style: const TextStyle(
+                                    color: Colors.red,
+                                    fontSize: 13,
+                                  ),
+                                ),
+                              ),
                             ],
                           ),
                         ),
 
-                      // --- EMAIL INPUT ---
-                      const Text("Email Adresi", style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14)),
+                      const Text(
+                        "Email Adresi",
+                        style: TextStyle(
+                          fontWeight: FontWeight.w500,
+                          fontSize: 14,
+                        ),
+                      ),
                       const SizedBox(height: 8),
                       TextField(
                         controller: _emailController,
                         decoration: InputDecoration(
                           hintText: "ornek@airportservices.com",
-                          prefixIcon: const Icon(Icons.email_outlined, color: Colors.grey),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                          contentPadding: const EdgeInsets.symmetric(vertical: 16),
+                          prefixIcon: const Icon(
+                            Icons.email_outlined,
+                            color: Colors.grey,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            vertical: 16,
+                          ),
                         ),
                       ),
                       const SizedBox(height: 20),
 
-                      // --- PASSWORD INPUT ---
-                      const Text("Şifre", style: TextStyle(fontWeight: FontWeight.w500, fontSize: 14)),
+                      const Text(
+                        "Şifre",
+                        style: TextStyle(
+                          fontWeight: FontWeight.w500,
+                          fontSize: 14,
+                        ),
+                      ),
                       const SizedBox(height: 8),
                       TextField(
                         controller: _passwordController,
                         obscureText: true,
                         decoration: InputDecoration(
                           hintText: "••••••••",
-                          prefixIcon: const Icon(Icons.lock_outline, color: Colors.grey),
-                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
-                          contentPadding: const EdgeInsets.symmetric(vertical: 16),
+                          prefixIcon: const Icon(
+                            Icons.lock_outline,
+                            color: Colors.grey,
+                          ),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            vertical: 16,
+                          ),
                         ),
                       ),
 
                       const SizedBox(height: 16),
-
-                      // --- REMEMBER ME & FORGOT PASSWORD ---
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Row(
-                            children: [
-                              SizedBox(
-                                height: 24, width: 24,
-                                child: Checkbox(
-                                  value: _rememberMe,
-                                  activeColor: Colors.teal,
-                                  onChanged: (val) {
-                                    setState(() => _rememberMe = val ?? false);
-                                  },
-                                ),
-                              ),
-                              const SizedBox(width: 8),
-                              const Text("Beni hatırla", style: TextStyle(fontSize: 13)),
-                            ],
-                          ),
-                          TextButton(
-                            onPressed: () {},
-                            child: const Text("Şifreyi unuttum?", style: TextStyle(color: Colors.teal, fontWeight: FontWeight.w600)),
-                          )
-                        ],
-                      ),
-
-                      const SizedBox(height: 24),
-
-                      // --- LOGIN BUTTON ---
                       ElevatedButton(
                         onPressed: _isLoading ? null : _handleLogin,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: Colors.teal,
                           foregroundColor: Colors.white,
                           padding: const EdgeInsets.symmetric(vertical: 16),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
                           elevation: 4,
                           shadowColor: Colors.teal.withOpacity(0.3),
                         ),
                         child: _isLoading
                             ? const SizedBox(
-                          height: 20, width: 20,
-                          child: CircularProgressIndicator(color: Colors.white, strokeWidth: 2),
-                        )
-                            : const Text("Giriş Yap", style: TextStyle(fontSize: 16, fontWeight: FontWeight.bold)),
+                                height: 20,
+                                width: 20,
+                                child: CircularProgressIndicator(
+                                  color: Colors.white,
+                                  strokeWidth: 2,
+                                ),
+                              )
+                            : const Text(
+                                "Giriş Yap",
+                                style: TextStyle(
+                                  fontSize: 16,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                       ),
 
-                      // --- FOOTER ---
                       const SizedBox(height: 24),
                       const Divider(),
                       const Padding(

@@ -1,5 +1,5 @@
 import 'package:flutter/material.dart';
-import 'dart:math';
+import '../../../core/services/checkin_service.dart';
 
 class CheckInTicketsScreen extends StatefulWidget {
   const CheckInTicketsScreen({super.key});
@@ -10,136 +10,160 @@ class CheckInTicketsScreen extends StatefulWidget {
 
 class _CheckInTicketsScreenState extends State<CheckInTicketsScreen> {
   // --- STATE ---
+  final CheckInService _checkInService = CheckInService();
+  bool _isLoading = true;
+  List<CheckInTicket> _tickets = [];
   String _searchTerm = "";
-  String _filterStatus = "all"; // 'all', 'Bekliyor', 'Tamamlandı'
+  String _filterStatus = "all"; // 'all', 'Bekleyen', 'Tamamlanan'
 
   // Modal Kontrolcüleri
   final TextEditingController _passportController = TextEditingController();
   String? _passportError;
 
-  // --- MOCK VERİLER ---
-  List<Map<String, dynamic>> _tickets = [
-    {
-      'id': 'T001', 'reservationId': 'R12345', 'passenger': 'Ahmet Yılmaz', 'passport': '',
-      'flight': 'TK101 - IST → AYT', 'flightDate': '2024-01-15', 'departureTime': '14:30',
-      'seat': '12A', 'class': 'Economy', 'checkInStatus': 'Bekliyor', 'checkInTime': null
-    },
-    {
-      'id': 'T002', 'reservationId': 'R12346', 'passenger': 'Ayşe Demir', 'passport': 'U23456789',
-      'flight': 'TK205 - IST → ADB', 'flightDate': '2024-01-15', 'departureTime': '15:45',
-      'seat': '8C', 'class': 'Business', 'checkInStatus': 'Tamamlandı', 'checkInTime': '10:45'
-    },
-    {
-      'id': 'T003', 'reservationId': 'R12347', 'passenger': 'Mehmet Kaya', 'passport': '',
-      'flight': 'TK301 - IST → ESB', 'flightDate': '2024-01-15', 'departureTime': '16:00',
-      'seat': '15B', 'class': 'Economy', 'checkInStatus': 'Bekliyor', 'checkInTime': null
-    },
-    {
-      'id': 'T004', 'reservationId': 'R12348', 'passenger': 'Fatma Şahin', 'passport': 'U45678901',
-      'flight': 'TK101 - IST → AYT', 'flightDate': '2024-01-15', 'departureTime': '14:30',
-      'seat': '20D', 'class': 'Economy', 'checkInStatus': 'Tamamlandı', 'checkInTime': '11:15'
-    },
-    {
-      'id': 'T005', 'reservationId': 'R12349', 'passenger': 'Ali Öztürk', 'passport': '',
-      'flight': 'TK205 - IST → ADB', 'flightDate': '2024-01-15', 'departureTime': '15:45',
-      'seat': '5A', 'class': 'Business', 'checkInStatus': 'Bekliyor', 'checkInTime': null
-    },
-    {
-      'id': 'T006', 'reservationId': 'R12350', 'passenger': 'Zeynep Arslan', 'passport': '',
-      'flight': 'TK401 - IST → DLM', 'flightDate': '2024-01-15', 'departureTime': '17:15',
-      'seat': '10F', 'class': 'Economy', 'checkInStatus': 'Bekliyor', 'checkInTime': null
-    },
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _loadTickets();
+  }
+
+  /// API'den bilet listesini yükle
+  Future<void> _loadTickets() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    final tickets = await _checkInService.getTicketList();
+
+    setState(() {
+      _tickets = tickets;
+      _isLoading = false;
+    });
+  }
+
+  // --- MOCK VERİLER (KALDIRILDI) ---
+  // Artık API'den gelen veriler kullanılıyor
 
   // --- FİLTRELEME ---
-  List<Map<String, dynamic>> get _filteredTickets {
-    return _tickets.where((t) {
+  List<CheckInTicket> get _filteredTickets {
+    return _tickets.where((ticket) {
       final matchesSearch =
-          t['passenger'].toLowerCase().contains(_searchTerm.toLowerCase()) ||
-              t['passport'].toLowerCase().contains(_searchTerm.toLowerCase()) ||
-              t['flight'].toLowerCase().contains(_searchTerm.toLowerCase()) ||
-              t['reservationId'].toLowerCase().contains(_searchTerm.toLowerCase());
+          ticket.passengerName.toLowerCase().contains(_searchTerm.toLowerCase()) ||
+          ticket.passportNo.toLowerCase().contains(_searchTerm.toLowerCase()) ||
+          ticket.route.toLowerCase().contains(_searchTerm.toLowerCase()) ||
+          ticket.reservationNo.toLowerCase().contains(_searchTerm.toLowerCase());
 
-      final matchesFilter = _filterStatus == 'all' || t['checkInStatus'] == _filterStatus;
+      final matchesFilter =
+          _filterStatus == 'all' || ticket.status == _filterStatus;
 
       return matchesSearch && matchesFilter;
     }).toList();
   }
 
   // --- CHECK-IN İŞLEMİ ---
-  void _showCheckInDialog(Map<String, dynamic> ticket) {
+  void _showCheckInDialog(CheckInTicket ticket) {
     _passportController.clear();
     _passportError = null;
 
     showDialog(
       context: context,
       builder: (ctx) => StatefulBuilder(
-          builder: (context, setModalState) {
-            return AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-              title: const Text("Pasaport Numarası Girin"),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  TextField(
-                    controller: _passportController,
-                    decoration: const InputDecoration(
-                      labelText: "Pasaport No",
-                      hintText: "Örn: U12345678",
-                      border: OutlineInputBorder(),
-                    ),
-                    onChanged: (val) {
-                      setModalState(() {
-                        _passportController.text = val.toUpperCase();
-                        _passportController.selection = TextSelection.fromPosition(TextPosition(offset: _passportController.text.length));
-                        _passportError = null;
-                      });
-                    },
+        builder: (context, setModalState) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(16),
+            ),
+            title: const Text("Pasaport Numarası Girin"),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                TextField(
+                  controller: _passportController,
+                  decoration: const InputDecoration(
+                    labelText: "Pasaport No",
+                    hintText: "Örn: U12345678",
+                    border: OutlineInputBorder(),
                   ),
-                  if (_passportError != null)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 8.0),
-                      child: Text(_passportError!, style: TextStyle(color: Colors.red.shade700, fontSize: 12)),
-                    )
-                ],
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text("İptal", style: TextStyle(color: Colors.grey)),
-                ),
-                ElevatedButton(
-                  style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white),
-                  onPressed: () {
-                    if (_passportController.text.trim().isEmpty) {
-                      setModalState(() => _passportError = "Pasaport numarası girilmesi zorunludur");
-                      return;
-                    }
-
-                    // Check-in Tamamla
-                    setState(() {
-                      final index = _tickets.indexWhere((t) => t['id'] == ticket['id']);
-                      if (index != -1) {
-                        final now = DateTime.now();
-                        _tickets[index] = {
-                          ..._tickets[index],
-                          'passport': _passportController.text.trim(),
-                          'checkInStatus': 'Tamamlandı',
-                          'checkInTime': "${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}"
-                        };
-                      }
+                  onChanged: (val) {
+                    setModalState(() {
+                      _passportController.text = val.toUpperCase();
+                      _passportController
+                          .selection = TextSelection.fromPosition(
+                        TextPosition(offset: _passportController.text.length),
+                      );
+                      _passportError = null;
                     });
-                    Navigator.pop(context);
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(content: Text("Check-in başarıyla tamamlandı."), backgroundColor: Colors.green),
-                    );
                   },
-                  child: const Text("Onayla"),
                 ),
+                if (_passportError != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8.0),
+                    child: Text(
+                      _passportError!,
+                      style: TextStyle(
+                        color: Colors.red.shade700,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
               ],
-            );
-          }
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text(
+                  "İptal",
+                  style: TextStyle(color: Colors.grey),
+                ),
+              ),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.orange,
+                  foregroundColor: Colors.white,
+                ),
+                onPressed: () {
+                  if (_passportController.text.trim().isEmpty) {
+                    setModalState(
+                      () => _passportError =
+                          "Pasaport numarası girilmesi zorunludur",
+                    );
+                    return;
+                  }
+
+                  // Check-in Tamamla (Backend'e istek gönderilecek - şimdilik sadece UI güncellemesi)
+                  // TODO: Backend API endpoint'i eklendiğinde burada API çağrısı yapılacak
+                  setState(() {
+                    final index = _tickets.indexWhere(
+                      (t) => t.reservationNo == ticket.reservationNo,
+                    );
+                    if (index != -1) {
+                      // Yeni ticket oluştur (immutable olduğu için)
+                      _tickets[index] = CheckInTicket(
+                        reservationNo: ticket.reservationNo,
+                        passengerName: ticket.passengerName,
+                        passportNo: _passportController.text.trim(),
+                        route: ticket.route,
+                        reservationDate: ticket.reservationDate,
+                        seatInfo: ticket.seatInfo,
+                        status: 'Tamamlanan',
+                      );
+                    }
+                  });
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Check-in başarıyla tamamlandı."),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                  // Verileri yeniden yükle
+                  _loadTickets();
+                },
+                child: const Text("Onayla"),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -159,9 +183,19 @@ class _CheckInTicketsScreenState extends State<CheckInTicketsScreen> {
             const Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text("Bilet Check-in", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black87)),
+                Text(
+                  "Bilet Check-in",
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                  ),
+                ),
                 SizedBox(height: 4),
-                Text("Yolcu biletlerini kontrol edin ve check-in yapın", style: TextStyle(color: Colors.grey)),
+                Text(
+                  "Yolcu biletlerini kontrol edin ve check-in yapın",
+                  style: TextStyle(color: Colors.grey),
+                ),
               ],
             ),
 
@@ -170,13 +204,18 @@ class _CheckInTicketsScreenState extends State<CheckInTicketsScreen> {
             // --- FİLTRELER VE ARAMA ---
             Container(
               padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade200)),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey.shade200),
+              ),
               child: Column(
                 children: [
                   TextField(
                     onChanged: (val) => setState(() => _searchTerm = val),
                     decoration: const InputDecoration(
-                      hintText: "Rezervasyon no, yolcu adı veya pasaport ara...",
+                      hintText:
+                          "Rezervasyon no, yolcu adı veya pasaport ara...",
                       prefixIcon: Icon(Icons.search, color: Colors.grey),
                       border: OutlineInputBorder(),
                       contentPadding: EdgeInsets.symmetric(horizontal: 12),
@@ -187,11 +226,25 @@ class _CheckInTicketsScreenState extends State<CheckInTicketsScreen> {
                     scrollDirection: Axis.horizontal,
                     child: Row(
                       children: [
-                        _FilterButton(label: "Tümü", isActive: _filterStatus == 'all', onTap: () => setState(() => _filterStatus = 'all')),
+                        _FilterButton(
+                          label: "Tümü",
+                          isActive: _filterStatus == 'all',
+                          onTap: () => setState(() => _filterStatus = 'all'),
+                        ),
                         const SizedBox(width: 8),
-                        _FilterButton(label: "Bekleyen", isActive: _filterStatus == 'Bekliyor', onTap: () => setState(() => _filterStatus = 'Bekliyor')),
+                        _FilterButton(
+                          label: "Bekleyen",
+                          isActive: _filterStatus == 'Bekleyen',
+                          onTap: () =>
+                              setState(() => _filterStatus = 'Bekleyen'),
+                        ),
                         const SizedBox(width: 8),
-                        _FilterButton(label: "Tamamlanan", isActive: _filterStatus == 'Tamamlandı', onTap: () => setState(() => _filterStatus = 'Tamamlandı')),
+                        _FilterButton(
+                          label: "Tamamlanan",
+                          isActive: _filterStatus == 'Tamamlanan',
+                          onTap: () =>
+                              setState(() => _filterStatus = 'Tamamlanan'),
+                        ),
                       ],
                     ),
                   ),
@@ -202,13 +255,32 @@ class _CheckInTicketsScreenState extends State<CheckInTicketsScreen> {
             const SizedBox(height: 24),
 
             // --- KART LİSTESİ ---
-            if (filtered.isEmpty)
-              const Center(child: Padding(padding: EdgeInsets.all(40), child: Text("Kayıt bulunamadı.")))
+            if (_isLoading)
+              const Center(
+                child: Padding(
+                  padding: EdgeInsets.all(40),
+                  child: CircularProgressIndicator(),
+                ),
+              )
+            else if (filtered.isEmpty)
+              Center(
+                child: Padding(
+                  padding: const EdgeInsets.all(40),
+                  child: Text(
+                    _tickets.isEmpty
+                        ? "Check-in yapılacak bilet bulunmamaktadır."
+                        : "Arama kriterlerinize uygun kayıt bulunamadı.",
+                    style: TextStyle(color: Colors.grey.shade600),
+                  ),
+                ),
+              )
             else
               LayoutBuilder(
                 builder: (context, constraints) {
                   // Masaüstünde 3, Tablette 2, Mobilde 1 kolon
-                  int crossAxisCount = constraints.maxWidth > 1100 ? 3 : (constraints.maxWidth > 700 ? 2 : 1);
+                  int crossAxisCount = constraints.maxWidth > 1100
+                      ? 3
+                      : (constraints.maxWidth > 700 ? 2 : 1);
                   return GridView.builder(
                     shrinkWrap: true,
                     physics: const NeverScrollableScrollPhysics(),
@@ -242,7 +314,11 @@ class _FilterButton extends StatelessWidget {
   final bool isActive;
   final VoidCallback onTap;
 
-  const _FilterButton({required this.label, required this.isActive, required this.onTap});
+  const _FilterButton({
+    required this.label,
+    required this.isActive,
+    required this.onTap,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -268,14 +344,14 @@ class _FilterButton extends StatelessWidget {
 }
 
 class _TicketCard extends StatelessWidget {
-  final Map<String, dynamic> ticket;
+  final CheckInTicket ticket;
   final VoidCallback onCheckIn;
 
   const _TicketCard({required this.ticket, required this.onCheckIn});
 
   @override
   Widget build(BuildContext context) {
-    bool isCompleted = ticket['checkInStatus'] == 'Tamamlandı';
+    bool isCompleted = ticket.isCompleted;
     Color statusColor = isCompleted ? Colors.green : Colors.orange;
 
     return Container(
@@ -283,8 +359,14 @@ class _TicketCard extends StatelessWidget {
       decoration: BoxDecoration(
         color: Colors.white,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: isCompleted ? Colors.green.withOpacity(0.3) : Colors.grey.shade200),
-        boxShadow: [BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 5)],
+        border: Border.all(
+          color: isCompleted
+              ? Colors.green.withOpacity(0.3)
+              : Colors.grey.shade200,
+        ),
+        boxShadow: [
+          BoxShadow(color: Colors.black.withOpacity(0.02), blurRadius: 5),
+        ],
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -298,19 +380,46 @@ class _TicketCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(ticket['passenger'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), overflow: TextOverflow.ellipsis),
-                    Text(ticket['reservationId'], style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+                    Text(
+                      ticket.passengerName,
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text(
+                      ticket.reservationNo,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: Colors.grey.shade500,
+                      ),
+                    ),
                   ],
                 ),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(color: statusColor.withOpacity(0.1), borderRadius: BorderRadius.circular(12)),
+                decoration: BoxDecoration(
+                  color: statusColor.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(12),
+                ),
                 child: Row(
                   children: [
-                    Icon(isCompleted ? Icons.check_circle : Icons.schedule, size: 14, color: statusColor),
+                    Icon(
+                      isCompleted ? Icons.check_circle : Icons.schedule,
+                      size: 14,
+                      color: statusColor,
+                    ),
                     const SizedBox(width: 4),
-                    Text(ticket['checkInStatus'], style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: statusColor)),
+                    Text(
+                      ticket.status,
+                      style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: statusColor,
+                      ),
+                    ),
                   ],
                 ),
               ),
@@ -320,13 +429,22 @@ class _TicketCard extends StatelessWidget {
           const Divider(height: 16),
 
           // Orta Kısım: Detaylar
-          _InfoRow(icon: Icons.flight_takeoff, text: ticket['flight']),
+          _InfoRow(icon: Icons.flight_takeoff, text: ticket.route),
           const SizedBox(height: 6),
-          _InfoRow(icon: Icons.calendar_today, text: "${ticket['flightDate']} • ${ticket['departureTime']}"),
+          _InfoRow(
+            icon: Icons.calendar_today,
+            text: ticket.reservationDate,
+          ),
           const SizedBox(height: 6),
-          _InfoRow(icon: Icons.event_seat, text: "Koltuk: ${ticket['seat']} • ${ticket['class']}"),
+          _InfoRow(
+            icon: Icons.event_seat,
+            text: ticket.seatInfo,
+          ),
           const SizedBox(height: 6),
-          _InfoRow(icon: Icons.contact_page, text: ticket['passport'].toString().isEmpty ? "Pasaport girilmedi" : ticket['passport']),
+          _InfoRow(
+            icon: Icons.contact_page,
+            text: ticket.passportNo,
+          ),
 
           const SizedBox(height: 12),
 
@@ -339,7 +457,9 @@ class _TicketCard extends StatelessWidget {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: Colors.orange,
                   foregroundColor: Colors.white,
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(8),
+                  ),
                   padding: const EdgeInsets.symmetric(vertical: 10),
                 ),
                 icon: const Icon(Icons.check),
@@ -350,9 +470,20 @@ class _TicketCard extends StatelessWidget {
             Container(
               width: double.infinity,
               padding: const EdgeInsets.symmetric(vertical: 10),
-              decoration: BoxDecoration(color: Colors.grey.shade50, borderRadius: BorderRadius.circular(8)),
-              child: const Center(child: Text("İşlem Tamamlandı", style: TextStyle(color: Colors.grey, fontWeight: FontWeight.bold))),
-            )
+              decoration: BoxDecoration(
+                color: Colors.grey.shade50,
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Center(
+                child: Text(
+                  "İşlem Tamamlandı",
+                  style: TextStyle(
+                    color: Colors.grey,
+                    fontWeight: FontWeight.bold,
+                  ),
+                ),
+              ),
+            ),
         ],
       ),
     );
@@ -369,7 +500,13 @@ class _InfoRow extends StatelessWidget {
       children: [
         Icon(icon, size: 16, color: Colors.grey.shade500),
         const SizedBox(width: 8),
-        Expanded(child: Text(text, style: TextStyle(fontSize: 13, color: Colors.grey.shade700), overflow: TextOverflow.ellipsis)),
+        Expanded(
+          child: Text(
+            text,
+            style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
       ],
     );
   }

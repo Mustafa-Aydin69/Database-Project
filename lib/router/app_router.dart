@@ -1,6 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 
+// --- SERVICE ---
+import '../core/services/auth_service.dart';
+
 // --- LAYOUTLAR ---
 import '../shared/layouts/admin_layout.dart';
 import '../shared/layouts/checkin_layout.dart';
@@ -13,6 +16,7 @@ import '../features/auth/login_screen.dart';
 import '../features/admin/dashboard/admin_dashboard_screen.dart';
 import '../features/checkin/dashboard/checkin_dashboard_screen.dart';
 import '../features/parking/dashboard/parking_dashboard_screen.dart';
+import '../features/customer/dashboard/customer_dashboard_screen.dart';
 
 // --- ADMIN MODÜLÜ SAYFALARI ---
 import '../features/admin/users/users_screen.dart';
@@ -35,7 +39,7 @@ import '../features/admin/gates/gates_screen.dart';
 
 // Admin - Otopark Yönetimi
 import '../features/admin/parking/vehicle-types/vehicle_types_screen.dart';
-import '../features/admin/parking/lots/parking_lots_screen.dart' as AdminLots;
+import '../features/admin/parking/lots/parking_lots_screen.dart';
 import '../features/admin/parking/spots/parking_spots_screen.dart';
 import '../features/admin/parking/user-vehicles/user_vehicles_screen.dart';
 import '../features/admin/parking/reservations/parking_reservations_screen.dart' as AdminRes;
@@ -54,6 +58,62 @@ import '../features/parking/payments/payments_list_screen.dart';
 
 final GoRouter appRouter = GoRouter(
   initialLocation: '/login',
+
+  // --- GÜVENLİK VE YETKİ KONTROLÜ ---
+  redirect: (context, state) {
+    final isLoggedIn = AuthService().currentRole != null;
+    final isLoggingIn = state.uri.toString() == '/login';
+
+    // 1. Giriş yapmamış kullanıcıyı Login'e at
+    if (!isLoggedIn && !isLoggingIn) return '/login';
+
+    // 2. Giriş yapmış kullanıcı Login'e gitmeye çalışırsa Dashboard'a at
+    if (isLoggedIn && isLoggingIn) {
+      // Rolüne göre doğru dashboard'a yönlendir
+      final role = AuthService().currentRole;
+      if (role == UserRole.checkInStaff) return '/checkin/dashboard';
+      if (role == UserRole.parkingStaff) return '/parking/dashboard';
+      if (role == UserRole.user) return '/customer/dashboard'; // Customer için
+      // Admin, AirportManager, FlightManager, ParkingManager için
+      return '/admin/dashboard';
+    }
+
+    // 3. ADMIN PANELİ YETKİ KONTROLÜ
+    if (isLoggedIn && state.uri.toString().startsWith('/admin')) {
+      if (!AuthService().hasAccess(state.uri.toString())) {
+
+        // --- UYARI MESAJI GÖSTERME (Burayı Ekledik) ---
+        // Router işlemi sırasında UI çizilemeyeceği için "Future.microtask" ile
+        // işlem bittikten hemen sonra çalışmasını sağlıyoruz.
+        Future.microtask(() {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context).clearSnackBars(); // Varsa eski mesajı sil
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: const Row(
+                  children: [
+                    Icon(Icons.lock_outline, color: Colors.white),
+                    SizedBox(width: 12),
+                    Expanded(child: Text("Bu sayfaya erişim yetkiniz yok!", style: TextStyle(fontWeight: FontWeight.bold))),
+                  ],
+                ),
+                backgroundColor: Colors.red.shade700,
+                behavior: SnackBarBehavior.floating, // Yüzen modern tasarım
+                margin: const EdgeInsets.all(16),
+                duration: const Duration(seconds: 3),
+                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+              ),
+            );
+          }
+        });
+
+        return '/admin/dashboard'; // Yetkisiz giriş -> Dashboard'a at
+      }
+    }
+
+    return null;
+  },
+
   routes: [
     // ----------------------------------------------------------------
     // 1. AUTH ROTASI
@@ -106,7 +166,7 @@ final GoRouter appRouter = GoRouter(
 
         // Otopark Yönetimi (Admin)
         GoRoute(path: '/admin/parking/vehicle-types', builder: (context, state) => const VehicleTypesScreen()),
-        GoRoute(path: '/admin/parking/lots', builder: (context, state) => const AdminLots.ParkingLotsScreen()),
+        GoRoute(path: '/admin/parking/lots', builder: (context, state) => const ParkingLotsScreen()),
         GoRoute(path: '/admin/parking/spots', builder: (context, state) => const ParkingSpotsScreen()),
         GoRoute(path: '/admin/parking/user-vehicles', builder: (context, state) => const UserVehiclesScreen()),
         GoRoute(path: '/admin/parking/reservations', builder: (context, state) => const AdminRes.ParkingReservationsScreen()),
@@ -133,11 +193,7 @@ final GoRouter appRouter = GoRouter(
       builder: (context, state, child) => ParkingLayout(child: child),
       routes: [
         GoRoute(path: '/parking/dashboard', builder: (context, state) => const ParkingDashboardScreen()),
-
-        // Giriş/Çıkış İşlemleri
         GoRoute(path: '/parking/entry-exit', builder: (context, state) => const EntryExitScreen()),
-
-        // Otopark Listesi ve Detayı
         GoRoute(path: '/parking/parking-lots-list', builder: (context, state) => const ParkingLotsListScreen()),
         GoRoute(
           path: '/parking/parking-lot-detail',
@@ -147,11 +203,17 @@ final GoRouter appRouter = GoRouter(
             return ParkingLotDetailScreen(lotName: name, airportName: airport);
           },
         ),
-
-        // Rezervasyon ve Ödemeler (Operasyonel)
         GoRoute(path: '/parking/reservations', builder: (context, state) => const OpsRes.ParkingReservationsScreen()),
         GoRoute(path: '/parking/payments-list', builder: (context, state) => const PaymentsListScreen()),
       ],
+    ),
+
+    // ----------------------------------------------------------------
+    // 5. CUSTOMER PANELİ
+    // ----------------------------------------------------------------
+    GoRoute(
+      path: '/customer/dashboard',
+      builder: (context, state) => const CustomerDashboardScreen(),
     ),
   ],
 );
