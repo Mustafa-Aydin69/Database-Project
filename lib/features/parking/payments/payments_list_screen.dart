@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:intl/intl.dart';
+import '../../../core/services/parking_service.dart';
 
 class PaymentsListScreen extends StatefulWidget {
   const PaymentsListScreen({super.key});
@@ -10,178 +11,116 @@ class PaymentsListScreen extends StatefulWidget {
 
 class _PaymentsListScreenState extends State<PaymentsListScreen> {
   // --- STATE ---
+  final ParkingService _parkingService = ParkingService();
+  bool _isLoadingStats = true;
+  bool _isLoadingPayments = true;
+  ParkingPaymentStatistics _paymentStats = ParkingPaymentStatistics.empty();
+  List<ParkingPayment> _payments = [];
   String _searchTerm = "";
   String _filterStatus = "all";
-  Map<String, dynamic>? _selectedPayment;
+  ParkingPayment? _selectedPayment;
 
-  // --- MOCK DATA ---
-  final List<Map<String, dynamic>> _payments = [
-    {
-      'id': '1',
-      'paymentId': 'PAY-2024-001',
-      'plate': '34 ABC 123',
-      'vehicleType': 'Otomobil',
-      'ownerName': 'Ahmet Yılmaz',
-      'entryTime': '2024-01-15 08:30',
-      'exitTime': '2024-01-15 14:30',
-      'duration': '6 saat',
-      'amount': 90.0,
-      'paymentMethod': 'Kredi Kartı',
-      'status': 'completed',
-      'spotNumber': 'A-15',
-    },
-    {
-      'id': '2',
-      'paymentId': 'PAY-2024-002',
-      'plate': '06 XYZ 789',
-      'vehicleType': 'SUV',
-      'ownerName': 'Ayşe Demir',
-      'entryTime': '2024-01-15 09:15',
-      'exitTime': '2024-01-15 15:45',
-      'duration': '6 saat 30 dakika',
-      'amount': 97.0,
-      'paymentMethod': 'Nakit',
-      'status': 'completed',
-      'spotNumber': 'B-23',
-    },
-    {
-      'id': '3',
-      'paymentId': 'PAY-2024-003',
-      'plate': '35 DEF 456',
-      'vehicleType': 'Minivan',
-      'ownerName': 'Mehmet Kaya',
-      'entryTime': '2024-01-15 10:00',
-      'exitTime': '2024-01-15 12:30',
-      'duration': '2 saat 30 dakika',
-      'amount': 37.0,
-      'paymentMethod': 'Mobil Ödeme',
-      'status': 'completed',
-      'spotNumber': 'C-08',
-    },
-    {
-      'id': '4',
-      'paymentId': 'PAY-2024-004',
-      'plate': '16 GHI 321',
-      'vehicleType': 'Otomobil',
-      'ownerName': 'Fatma Şahin',
-      'entryTime': '2024-01-15 11:20',
-      'exitTime': '2024-01-15 18:50',
-      'duration': '7 saat 30 dakika',
-      'amount': 112.0,
-      'paymentMethod': 'Kredi Kartı',
-      'status': 'completed',
-      'spotNumber': 'A-42',
-    },
-    {
-      'id': '5',
-      'paymentId': 'PAY-2024-005',
-      'plate': '41 JKL 654',
-      'vehicleType': 'Pickup',
-      'ownerName': 'Ali Öztürk',
-      'entryTime': '2024-01-15 12:45',
-      'exitTime': '2024-01-15 16:15',
-      'duration': '3 saat 30 dakika',
-      'amount': 52.0,
-      'paymentMethod': 'Nakit',
-      'status': 'completed',
-      'spotNumber': 'D-17',
-    },
-    {
-      'id': '6',
-      'paymentId': 'PAY-2024-006',
-      'plate': '34 MNO 987',
-      'vehicleType': 'Otomobil',
-      'ownerName': 'Zeynep Arslan',
-      'entryTime': '2024-01-15 07:00',
-      'exitTime': '2024-01-15 19:30',
-      'duration': '12 saat 30 dakika',
-      'amount': 187.0,
-      'paymentMethod': 'Kredi Kartı',
-      'status': 'completed',
-      'spotNumber': 'B-12',
-    },
-    {
-      'id': '7',
-      'paymentId': 'PAY-2024-007',
-      'plate': '06 PQR 246',
-      'vehicleType': 'SUV',
-      'ownerName': 'Hasan Çelik',
-      'entryTime': '2024-01-15 06:30',
-      'exitTime': '2024-01-15 20:00',
-      'duration': '13 saat 30 dakika',
-      'amount': 202.0,
-      'paymentMethod': 'Mobil Ödeme',
-      'status': 'completed',
-      'spotNumber': 'C-29',
-    },
-    {
-      'id': '8',
-      'paymentId': 'PAY-2024-008',
-      'plate': '35 STU 135',
-      'vehicleType': 'Otomobil',
-      'ownerName': 'Elif Yıldız',
-      'entryTime': '2024-01-15 13:00',
-      'exitTime': '2024-01-15 14:00',
-      'duration': '1 saat',
-      'amount': 20.0,
-      'paymentMethod': 'Nakit',
-      'status': 'completed',
-      'spotNumber': 'A-08',
-    },
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
+
+  /// API'den tüm verileri yükle (istatistikler ve ödeme listesi)
+  Future<void> _loadData() async {
+    setState(() {
+      _isLoadingStats = true;
+      _isLoadingPayments = true;
+    });
+
+    try {
+      // İstatistikler ve ödeme listesini paralel yükle
+      final results = await Future.wait([
+        _parkingService.getPaymentStatistics(),
+        _parkingService.getPaymentList(),
+      ]);
+
+      final stats = results[0] as ParkingPaymentStatistics?;
+      final payments = results[1] as List<ParkingPayment>;
+
+      debugPrint('📥 Statistics loaded: totalRevenue=${stats?.totalRevenue ?? 0}, totalCount=${stats?.totalTransactionCount ?? 0}, average=${stats?.averagePayment ?? 0}');
+      debugPrint('📥 Payments loaded: ${payments.length} items');
+      if (payments.isNotEmpty) {
+        debugPrint('📋 First payment: ${payments[0].paymentId} - ${payments[0].plateNumber} - ${payments[0].status}');
+      }
+
+      setState(() {
+        _paymentStats = stats ?? ParkingPaymentStatistics.empty();
+        _payments = payments;
+        _isLoadingStats = false;
+        _isLoadingPayments = false;
+      });
+    } catch (e) {
+      debugPrint('❌ Error loading payments: $e');
+      setState(() {
+        _isLoadingStats = false;
+        _isLoadingPayments = false;
+      });
+    }
+  }
 
   // --- FILTERING ---
-  List<Map<String, dynamic>> get _filteredPayments {
+  List<ParkingPayment> get _filteredPayments {
     return _payments.where((payment) {
       final matchesSearch =
-          payment['plate'].toLowerCase().contains(_searchTerm.toLowerCase()) ||
-              payment['ownerName'].toLowerCase().contains(_searchTerm.toLowerCase()) ||
-              payment['paymentId'].toLowerCase().contains(_searchTerm.toLowerCase());
-      final matchesStatus = _filterStatus == 'all' || payment['status'] == _filterStatus;
+          payment.plateNumber.toLowerCase().contains(_searchTerm.toLowerCase()) ||
+              payment.ownerName.toLowerCase().contains(_searchTerm.toLowerCase()) ||
+              payment.paymentId.toLowerCase().contains(_searchTerm.toLowerCase());
+      
+      // Status mapping: API'den gelen "Tamamlandı"/"Completed", "Bekleyen"/"Pending", "İptal"/"Cancelled" değerlerini filtrele
+      final paymentStatusLower = payment.status.toLowerCase().trim();
+      final matchesStatus = _filterStatus == 'all' || 
+          (_filterStatus == 'completed' && (paymentStatusLower == 'tamamlandı' || paymentStatusLower == 'completed')) ||
+          (_filterStatus == 'pending' && (paymentStatusLower == 'bekleyen' || paymentStatusLower == 'pending')) ||
+          (_filterStatus == 'cancelled' && (paymentStatusLower == 'iptal' || paymentStatusLower == 'cancelled' || paymentStatusLower == 'canceled'));
+      
       return matchesSearch && matchesStatus;
     }).toList();
   }
 
-  // --- STATS ---
-  double get _totalRevenue =>
-      _filteredPayments.fold(0, (sum, item) => sum + (item['amount'] as double));
-
-  int get _totalPayments => _filteredPayments.length;
-
-  double get _averagePayment =>
-      _totalPayments > 0 ? _totalRevenue / _totalPayments : 0;
+  // --- STATS (API'den gelen veriler kullanılıyor) ---
+  double get _totalRevenue => _paymentStats.totalRevenue;
+  int get _totalPayments => _paymentStats.totalTransactionCount;
+  double get _averagePayment => _paymentStats.averagePayment;
 
   // --- HELPERS ---
+  /// Status'a göre renk döndürür (API'den gelen Türkçe status değerleri)
   Color _getStatusColor(String status) {
-    switch (status) {
-      case 'completed':
-        return Colors.green;
-      case 'pending':
-        return Colors.orange;
-      case 'refunded':
-        return Colors.red;
-      default:
-        return Colors.grey;
+    final statusLower = status.toLowerCase();
+    if (statusLower == 'tamamlandı' || statusLower == 'completed') {
+      return Colors.green;
+    } else if (statusLower == 'bekleyen' || statusLower == 'pending') {
+      return Colors.orange;
+    } else if (statusLower == 'iptal' || statusLower == 'cancelled' || statusLower == 'canceled') {
+      return Colors.red;
     }
+    return Colors.grey;
   }
 
-  String _getStatusLabel(String status) {
-    switch (status) {
-      case 'completed':
-        return 'Tamamlandı';
-      case 'pending':
-        return 'Beklemede';
-      case 'refunded':
-        return 'İade Edildi';
-      default:
-        return status;
+  /// Kalış süresini dakikadan okunabilir formata çevir
+  String _formatDuration(int minutes) {
+    if (minutes < 60) {
+      return '$minutes dk';
     }
+    final hours = minutes ~/ 60;
+    final remainingMinutes = minutes % 60;
+    if (remainingMinutes == 0) {
+      return '$hours saat';
+    }
+    return '$hours saat $remainingMinutes dk';
   }
 
-  void _showDetailModal(Map<String, dynamic> payment) {
+  void _showDetailModal(ParkingPayment payment) {
     setState(() {
       _selectedPayment = payment;
     });
+    final currencyFormat = NumberFormat.currency(locale: 'tr_TR', symbol: '₺');
+    
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
@@ -201,26 +140,26 @@ class _PaymentsListScreenState extends State<PaymentsListScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _DetailRow("Ödeme ID", payment['paymentId']),
-                _DetailRow("Plaka", payment['plate']),
-                _DetailRow("Araç Tipi", payment['vehicleType']),
-                _DetailRow("Araç Sahibi", payment['ownerName']),
-                _DetailRow("Park Yeri", payment['spotNumber']),
+                _DetailRow("Ödeme No", payment.paymentId),
+                _DetailRow("Plaka", payment.plateNumber),
+                _DetailRow("Araç Tipi", payment.vehicleType),
+                _DetailRow("Araç Sahibi", payment.ownerName),
+                _DetailRow("Park Yeri", payment.spotNumber),
                 const Divider(),
-                _DetailRow("Giriş Saati", payment['entryTime']),
-                _DetailRow("Çıkış Saati", payment['exitTime']),
-                _DetailRow("Kalış Süresi", payment['duration']),
+                _DetailRow("Giriş Saati", payment.checkInTime),
+                _DetailRow("Çıkış Saati", payment.checkOutTime),
+                _DetailRow("Kalış Süresi", _formatDuration(payment.stayDurationMinutes)),
                 const Divider(),
-                _DetailRow("Ödeme Yöntemi", payment['paymentMethod']),
-                _DetailRow("Durum", _getStatusLabel(payment['status']),
-                    color: _getStatusColor(payment['status']), isBold: true),
+                _DetailRow("Ödeme Yöntemi", payment.paymentMethod),
+                _DetailRow("Durum", payment.status,
+                    color: _getStatusColor(payment.status), isBold: true),
                 const SizedBox(height: 10),
                 Row(
                   mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     const Text("Toplam Tutar:",
                         style: TextStyle(fontWeight: FontWeight.bold)),
-                    Text("${payment['amount']} ₺",
+                    Text(currencyFormat.format(payment.amount),
                         style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
@@ -252,6 +191,9 @@ class _PaymentsListScreenState extends State<PaymentsListScreen> {
   Widget build(BuildContext context) {
     final filtered = _filteredPayments;
     final currencyFormat = NumberFormat.currency(locale: 'tr_TR', symbol: '₺');
+    
+    // Debug: Ödeme sayısını logla
+    debugPrint('🔍 Build - Total payments: ${_payments.length}, Filtered: ${filtered.length}');
 
     return Scaffold(
       backgroundColor: const Color(0xFFF9FAFB),
@@ -285,19 +227,19 @@ class _PaymentsListScreenState extends State<PaymentsListScreen> {
                   children: [
                     _StatCard(
                       label: "Toplam Gelir",
-                      value: currencyFormat.format(_totalRevenue),
+                      value: _isLoadingStats ? '...' : currencyFormat.format(_totalRevenue),
                       icon: Icons.monetization_on_outlined,
                       color: Colors.orange,
                     ),
                     _StatCard(
                       label: "Toplam İşlem",
-                      value: "$_totalPayments",
+                      value: _isLoadingStats ? '...' : "$_totalPayments",
                       icon: Icons.receipt_long,
                       color: Colors.green,
                     ),
                     _StatCard(
                       label: "Ortalama Ödeme",
-                      value: currencyFormat.format(_averagePayment),
+                      value: _isLoadingStats ? '...' : currencyFormat.format(_averagePayment),
                       icon: Icons.show_chart,
                       color: Colors.teal,
                     ),
@@ -350,9 +292,9 @@ class _PaymentsListScreenState extends State<PaymentsListScreen> {
                             DropdownMenuItem(
                                 value: "completed", child: Text("Tamamlandı")),
                             DropdownMenuItem(
-                                value: "pending", child: Text("Beklemede")),
+                                value: "pending", child: Text("Bekleyen")),
                             DropdownMenuItem(
-                                value: "refunded", child: Text("İade Edildi")),
+                                value: "cancelled", child: Text("İptal")),
                           ],
                           onChanged: (val) =>
                               setState(() => _filterStatus = val!),
@@ -367,36 +309,40 @@ class _PaymentsListScreenState extends State<PaymentsListScreen> {
             const SizedBox(height: 24),
 
             // --- PAYMENTS LIST ---
-            if (filtered.isEmpty)
-              const Center(
-                  child: Padding(
-                      padding: EdgeInsets.all(40),
-                      child: Text("Ödeme bulunamadı.")))
-            else
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  int crossAxisCount = constraints.maxWidth > 1100
-                      ? 3
-                      : (constraints.maxWidth > 700 ? 2 : 1);
-                  return GridView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: crossAxisCount,
-                      crossAxisSpacing: 16,
-                      mainAxisSpacing: 16,
-                      childAspectRatio: 1.6,
-                    ),
-                    itemCount: filtered.length,
-                    itemBuilder: (context, index) {
-                      return _PaymentCard(
-                        payment: filtered[index],
-                        onTap: () => _showDetailModal(filtered[index]),
-                      );
-                    },
-                  );
-                },
-              ),
+            _isLoadingPayments
+                ? const Center(
+                    child: Padding(
+                        padding: EdgeInsets.all(40),
+                        child: CircularProgressIndicator()))
+                : filtered.isEmpty
+                    ? const Center(
+                        child: Padding(
+                            padding: EdgeInsets.all(40),
+                            child: Text("Ödeme bulunamadı.")))
+                    : LayoutBuilder(
+                        builder: (context, constraints) {
+                          int crossAxisCount = constraints.maxWidth > 1100
+                              ? 3
+                              : (constraints.maxWidth > 700 ? 2 : 1);
+                          return GridView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: crossAxisCount,
+                              crossAxisSpacing: 16,
+                              mainAxisSpacing: 16,
+                              childAspectRatio: 1.6,
+                            ),
+                            itemCount: filtered.length,
+                            itemBuilder: (context, index) {
+                              return _PaymentCard(
+                                payment: filtered[index],
+                                onTap: () => _showDetailModal(filtered[index]),
+                              );
+                            },
+                          );
+                        },
+                      ),
           ],
         ),
       ),
@@ -456,40 +402,28 @@ class _StatCard extends StatelessWidget {
 }
 
 class _PaymentCard extends StatelessWidget {
-  final Map<String, dynamic> payment;
+  final ParkingPayment payment;
   final VoidCallback onTap;
 
   const _PaymentCard({required this.payment, required this.onTap});
 
   Color _getStatusColor(String status) {
     switch (status) {
-      case 'completed':
+      case 'Tamamlandı':
         return Colors.green;
-      case 'pending':
+      case 'Bekleyen':
         return Colors.orange;
-      case 'refunded':
+      case 'İptal':
         return Colors.red;
       default:
         return Colors.grey;
     }
   }
 
-  String _getStatusLabel(String status) {
-    switch (status) {
-      case 'completed':
-        return 'Tamamlandı';
-      case 'pending':
-        return 'Beklemede';
-      case 'refunded':
-        return 'İade Edildi';
-      default:
-        return status;
-    }
-  }
-
   @override
   Widget build(BuildContext context) {
-    final statusColor = _getStatusColor(payment['status']);
+    final statusColor = _getStatusColor(payment.status);
+    final currencyFormat = NumberFormat.currency(locale: 'tr_TR', symbol: '₺');
 
     return InkWell(
       onTap: onTap,
@@ -515,10 +449,10 @@ class _PaymentCard extends StatelessWidget {
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(payment['plate'],
+                      Text(payment.plateNumber,
                           style: const TextStyle(
                               fontWeight: FontWeight.bold, fontSize: 16)),
-                      Text(payment['paymentId'],
+                      Text(payment.paymentId,
                           style: const TextStyle(
                               fontSize: 12, color: Colors.grey)),
                     ],
@@ -530,7 +464,7 @@ class _PaymentCard extends StatelessWidget {
                   decoration: BoxDecoration(
                       color: statusColor.withOpacity(0.1),
                       borderRadius: BorderRadius.circular(8)),
-                  child: Text(_getStatusLabel(payment['status']),
+                  child: Text(payment.status,
                       style: TextStyle(
                           fontSize: 11,
                           fontWeight: FontWeight.bold,
@@ -539,14 +473,14 @@ class _PaymentCard extends StatelessWidget {
               ],
             ),
             const Divider(),
-            _InfoRow(label: "Sahibi", value: payment['ownerName']),
-            _InfoRow(label: "Yöntem", value: payment['paymentMethod']),
-            _InfoRow(label: "Tarih", value: payment['exitTime'].split(" ")[0]),
+            _InfoRow(label: "Sahibi", value: payment.ownerName),
+            _InfoRow(label: "Yöntem", value: payment.paymentMethod),
+            _InfoRow(label: "Park Yeri", value: payment.spotNumber),
             const SizedBox(height: 8),
             Row(
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
-                Text("${payment['amount']} ₺",
+                Text(currencyFormat.format(payment.amount),
                     style: const TextStyle(
                         fontSize: 18,
                         fontWeight: FontWeight.bold,

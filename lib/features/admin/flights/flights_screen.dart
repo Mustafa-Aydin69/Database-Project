@@ -237,14 +237,19 @@ class _FlightsScreenState extends State<FlightsScreen> {
   // --- CRUD İŞLEMLERİ ---
 
   Future<void> _selectDateTime(BuildContext context, bool isDeparture) async {
+    final now = DateTime.now();
+    final safeInitialDate = now.isAfter(DateTime(2030, 12, 31))
+        ? DateTime(2030, 12, 31)
+        : now;
+    
     final DateTime? pickedDate = await showDatePicker(
       context: context,
 
-      initialDate: DateTime.now(),
+      initialDate: safeInitialDate,
 
       firstDate: DateTime(2023),
 
-      lastDate: DateTime(2025),
+      lastDate: DateTime(2030, 12, 31),
     );
 
     if (pickedDate != null) {

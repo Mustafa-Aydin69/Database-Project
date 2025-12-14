@@ -1,7 +1,13 @@
 import 'package:flutter/material.dart';
 
-class ParkingDashboardScreen extends StatelessWidget {
+class ParkingDashboardScreen extends StatefulWidget {
   const ParkingDashboardScreen({super.key});
+
+  @override
+  State<ParkingDashboardScreen> createState() => _ParkingDashboardScreenState();
+}
+
+class _ParkingDashboardScreenState extends State<ParkingDashboardScreen> {
 
   @override
   Widget build(BuildContext context) {
