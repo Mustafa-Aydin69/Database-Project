@@ -7,6 +7,8 @@ import 'models/exit_vehicle_model.dart';
 import 'services/recent_exits_api.dart';
 import 'models/exit_popup_info_model.dart';
 import 'services/parking_api_service.dart';
+import 'models/exit_panel_card.dart';
+import 'services/exit_panel_cards_api.dart';
 
 class EntryExitScreen extends StatefulWidget {
   const EntryExitScreen({super.key});
@@ -18,7 +20,7 @@ class EntryExitScreen extends StatefulWidget {
 class _EntryExitScreenState extends State<EntryExitScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
   Future<List<CurrentlyParkedVehicleModel>>? _parkedFuture;
-  Future<List<ExitVehicleModel>>? _recentExitsFuture;
+  Future<List<ExitPanelCard>>? _recentExitsFuture;
 
   // --- MOCK VERİLER ---
   List<Map<String, dynamic>> _parkedVehicles = [
@@ -79,7 +81,7 @@ class _EntryExitScreenState extends State<EntryExitScreen> with SingleTickerProv
 
   void _loadRecentExits() {
     setState(() {
-      _recentExitsFuture = RecentExitsApi.fetchRecentExits(topN: 20);
+      _recentExitsFuture = ExitPanelCardsApi.fetch();
     });
   }
 
@@ -450,7 +452,7 @@ class _EntryExitScreenState extends State<EntryExitScreen> with SingleTickerProv
                     },
                   ),
                   // 2. SON ÇIKIŞLAR
-                  FutureBuilder<List<ExitVehicleModel>>(
+                  FutureBuilder<List<ExitPanelCard>>(
                     future: _recentExitsFuture,
                     builder: (context, snapshot) {
                       if (snapshot.connectionState == ConnectionState.waiting) {
@@ -470,14 +472,16 @@ class _EntryExitScreenState extends State<EntryExitScreen> with SingleTickerProv
                       }
                       final data = snapshot.data ?? [];
                       final vehicles = data.map((e) {
+                        final ownerText = e.owner.trim().isEmpty ? '-' : e.owner;
+                        final locationText = e.location.trim().isEmpty ? '-' : e.location;
                         return {
-                          'id': '${e.plateNumber}-${(e.checkOutTime ?? DateTime.now()).toIso8601String()}',
+                          'id': '${e.plateNumber}-${(e.exitTime ?? DateTime.now()).toIso8601String()}',
                           'plate': e.plateNumber,
                           'vehicleType': e.vehicleType,
-                          'ownerName': e.ownerName,
-                          'entryTime': e.checkInTime != null ? _formatDateTime(e.checkInTime!) : '',
-                          'parkingLotName': e.parkingLot,
-                          'status': 'exited',
+                          'ownerName': ownerText,
+                          'entryTime': e.entryTime != null ? _formatDateTime(e.entryTime!) : '-',
+                          'parkingLotName': locationText,
+                          'status': e.status.isNotEmpty ? e.status : 'Çıkış Yapıldı',
                         };
                       }).toList();
                       return _VehicleGrid(
@@ -553,7 +557,7 @@ class _VehicleGrid extends StatelessWidget {
                             borderRadius: BorderRadius.circular(12)
                         ),
                         child: Text(
-                            isParked ? vehicle['spotNumber'] : "Çıkış Yapıldı",
+                            isParked ? vehicle['spotNumber'] : (vehicle['status'] ?? 'Çıkış Yapıldı'),
                             style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.bold,

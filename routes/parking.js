@@ -339,6 +339,25 @@ router.get('/currently-parked', async (req, res) => {
   }
 });
 
+router.get('/exit-panel-cards', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const result = await pool.request().execute('AirportParkingSystem.usp_GetExitPanelCards');
+
+    if (result.recordset && result.recordset[0]) {
+      console.log(Object.keys(result.recordset[0]));
+      console.log(result.recordset[0]);
+    }
+    return res.json({ success: true, data: result.recordset || [] });
+  } catch (error) {
+    console.error('Exit panel cards error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Sunucu hatası: ' + error.message
+    });
+  }
+});
+
 // GET /api/parking/exit-popup-info?plateNumber=...
 router.get('/exit-popup-info', async (req, res) => {
   try {
