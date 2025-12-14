@@ -9,6 +9,8 @@ import 'models/exit_popup_info_model.dart';
 import 'services/parking_api_service.dart';
 import 'models/exit_panel_card.dart';
 import 'services/exit_panel_cards_api.dart';
+import 'models/parking_lot_dropdown_item.dart';
+import 'services/parking_lots_api.dart';
 
 class EntryExitScreen extends StatefulWidget {
   const EntryExitScreen({super.key});
@@ -59,11 +61,15 @@ class _EntryExitScreenState extends State<EntryExitScreen> with SingleTickerProv
   final TextEditingController _ownerNameController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _spotController = TextEditingController();
-  String _selectedVehicleType = 'Otomobil';
-  String _selectedAirport = 'İstanbul Havalimanı (IST)';
+  int? _selectedVehicleTypeId;
+  String _selectedVehicleTypeName = '';
+  int? _selectedParkingLotId;
+  String _selectedParkingLotName = '';
 
-  final List<String> _vehicleTypes = ['Otomobil', 'SUV', 'Minivan', 'Pickup', 'Motosiklet'];
-  final List<String> _airports = ['İstanbul Havalimanı (IST)', 'Sabiha Gökçen (SAW)', 'Antalya Havalimanı (AYT)', 'Esenboğa (ESB)'];
+  Future<List<Map<String, dynamic>>>? _vehicleTypesFuture;
+  Future<List<ParkingLotDropdownItem>>? _parkingLotsFuture;
+  bool _isSubmittingEntry = false;
+  String? _entryError;
 
   @override
   void initState() {
@@ -101,6 +107,9 @@ class _EntryExitScreenState extends State<EntryExitScreen> with SingleTickerProv
     _ownerNameController.clear();
     _phoneController.clear();
     _spotController.clear();
+    _entryError = null;
+    _isSubmittingEntry = false;
+    _vehicleTypesFuture ??= ParkingApiService.getVehicleTypes();
 
     showDialog(
       context: context,
@@ -120,11 +129,52 @@ class _EntryExitScreenState extends State<EntryExitScreen> with SingleTickerProv
                     validator: (v) => v!.isEmpty ? "Zorunlu" : null,
                   ),
                   const SizedBox(height: 16),
-                  DropdownButtonFormField<String>(
-                    value: _selectedVehicleType,
-                    decoration: const InputDecoration(labelText: "Araç Tipi", border: OutlineInputBorder()),
-                    items: _vehicleTypes.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
-                    onChanged: (val) => setState(() => _selectedVehicleType = val!),
+                  FutureBuilder<List<Map<String, dynamic>>>(
+                    future: _vehicleTypesFuture,
+                    builder: (context, snapTypes) {
+                      if (snapTypes.connectionState == ConnectionState.waiting) {
+                        return const SizedBox(
+                          height: 56,
+                          child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                        );
+                      }
+                      if (snapTypes.hasError) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text('Araç tipleri alınamadı', style: TextStyle(color: Colors.red.shade700)),
+                            const SizedBox(height: 8),
+                            OutlinedButton(
+                              onPressed: () => setState(() => _vehicleTypesFuture = ParkingApiService.getVehicleTypes()),
+                              child: const Text('Tekrar Dene'),
+                            ),
+                          ],
+                        );
+                      }
+                      final types = snapTypes.data ?? [];
+                      return DropdownButtonFormField<int>(
+                        value: _selectedVehicleTypeId,
+                        decoration: const InputDecoration(labelText: "Araç Tipi", border: OutlineInputBorder()),
+                        items: types
+                            .map((t) => DropdownMenuItem(
+                                  value: t['typeId'] as int,
+                                  child: Text((t['typeName'] as String?) ?? ''),
+                                ))
+                            .toList(),
+                        onChanged: (val) {
+                          setState(() {
+                            _selectedVehicleTypeId = val;
+                            final found = types.firstWhere(
+                              (x) => x['typeId'] == val,
+                              orElse: () => {'typeId': val ?? 0, 'typeName': ''},
+                            );
+                            _selectedVehicleTypeName = (found['typeName'] as String?) ?? '';
+                          });
+                        },
+                        isExpanded: true,
+                        validator: (v) => (v == null) ? "Zorunlu" : null,
+                      );
+                    },
                   ),
                   const SizedBox(height: 16),
                   TextFormField(
@@ -136,14 +186,52 @@ class _EntryExitScreenState extends State<EntryExitScreen> with SingleTickerProv
                   TextFormField(
                     controller: _phoneController,
                     decoration: const InputDecoration(labelText: "Telefon", border: OutlineInputBorder()),
+                    validator: (v) => v!.isEmpty ? "Zorunlu" : null,
                   ),
                   const SizedBox(height: 16),
-                  DropdownButtonFormField<String>(
-                    value: _selectedAirport,
-                    decoration: const InputDecoration(labelText: "Havalimanı", border: OutlineInputBorder()),
-                    items: _airports.map((a) => DropdownMenuItem(value: a, child: Text(a, overflow: TextOverflow.ellipsis))).toList(),
-                    onChanged: (val) => setState(() => _selectedAirport = val!),
-                    isExpanded: true,
+                  FutureBuilder<List<ParkingLotDropdownItem>>(
+                    future: _parkingLotsFuture ??= ParkingLotsApi.fetch(),
+                    builder: (context, snapLots) {
+                      if (snapLots.connectionState == ConnectionState.waiting) {
+                        return const SizedBox(
+                          height: 56,
+                          child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                        );
+                      }
+                      if (snapLots.hasError) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text('Otopark listesi alınamadı', style: TextStyle(color: Colors.red.shade700)),
+                            const SizedBox(height: 8),
+                            OutlinedButton(
+                              onPressed: () => setState(() => _parkingLotsFuture = ParkingLotsApi.fetch()),
+                              child: const Text('Tekrar Dene'),
+                            ),
+                          ],
+                        );
+                      }
+                      final lots = snapLots.data ?? [];
+                      return DropdownButtonFormField<int>(
+                        value: _selectedParkingLotId,
+                        decoration: const InputDecoration(labelText: "Havalimanı", border: OutlineInputBorder()),
+                        items: lots
+                            .map((l) => DropdownMenuItem(
+                                  value: l.parkingLotID,
+                                  child: Text(l.lotName, overflow: TextOverflow.ellipsis),
+                                ))
+                            .toList(),
+                        onChanged: (val) {
+                          setState(() {
+                            _selectedParkingLotId = val;
+                            final found = lots.firstWhere((x) => x.parkingLotID == val, orElse: () => ParkingLotDropdownItem(parkingLotID: val ?? 0, lotName: ''));
+                            _selectedParkingLotName = found.lotName;
+                          });
+                        },
+                        isExpanded: true,
+                        validator: (v) => (v == null) ? "Zorunlu" : null,
+                      );
+                    },
                   ),
                   const SizedBox(height: 16),
                   TextFormField(
@@ -151,6 +239,10 @@ class _EntryExitScreenState extends State<EntryExitScreen> with SingleTickerProv
                     decoration: const InputDecoration(labelText: "Park Yeri No", border: OutlineInputBorder()),
                     validator: (v) => v!.isEmpty ? "Zorunlu" : null,
                   ),
+                  if (_entryError != null) ...[
+                    const SizedBox(height: 8),
+                    Text(_entryError!, style: TextStyle(color: Colors.red.shade700)),
+                  ]
                 ],
               ),
             ),
@@ -160,26 +252,47 @@ class _EntryExitScreenState extends State<EntryExitScreen> with SingleTickerProv
           TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white),
-            onPressed: () {
-              if (_entryFormKey.currentState!.validate()) {
-                setState(() {
-                  _parkedVehicles.insert(0, {
-                    'id': DateTime.now().millisecondsSinceEpoch.toString(),
-                    'plate': _plateController.text,
-                    'vehicleType': _selectedVehicleType,
-                    'ownerName': _ownerNameController.text,
-                    'ownerPhone': _phoneController.text,
-                    'entryTime': DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now()),
-                    'spotNumber': _spotController.text,
-                    'airportName': _selectedAirport,
-                    'parkingLotName': 'A Terminali Otopark', // Varsayılan
-                    'status': 'parked'
-                  });
-                });
-                Navigator.pop(context);
-              }
-            },
-            child: const Text("Giriş Yap"),
+            onPressed: _isSubmittingEntry
+                ? null
+                : () async {
+                    if (_entryFormKey.currentState!.validate()) {
+                      setState(() {
+                        _isSubmittingEntry = true;
+                        _entryError = null;
+                      });
+                      try {
+                        final result = await ParkingApiService.createParkingEntry(
+                          plateNumber: _plateController.text.trim(),
+                          typeId: _selectedVehicleTypeId!,
+                          ownerFullName: _ownerNameController.text.trim(),
+                          ownerPhone: _phoneController.text.trim(),
+                          parkingLotId: _selectedParkingLotId!,
+                          spotNumber: _spotController.text.trim(),
+                        );
+                        setState(() {
+                          _parkedVehicles.insert(0, {
+                            'id': (result['ParkingReservationID'] ?? DateTime.now().millisecondsSinceEpoch).toString(),
+                            'plate': _plateController.text,
+                            'vehicleType': _selectedVehicleTypeName,
+                            'ownerName': _ownerNameController.text,
+                            'ownerPhone': _phoneController.text,
+                            'entryTime': DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now()),
+                            'spotNumber': _spotController.text,
+                            'parkingLotID': _selectedParkingLotId,
+                            'parkingLotName': _selectedParkingLotName,
+                            'status': 'parked'
+                          });
+                        });
+                        Navigator.pop(context);
+                      } catch (e) {
+                        setState(() {
+                          _entryError = e.toString();
+                          _isSubmittingEntry = false;
+                        });
+                      }
+                    }
+                  },
+            child: _isSubmittingEntry ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Text("Giriş Yap"),
           ),
         ],
       ),

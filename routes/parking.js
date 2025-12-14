@@ -358,6 +358,95 @@ router.get('/exit-panel-cards', async (req, res) => {
   }
 });
 
+router.get('/parking-lots', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const result = await pool.request().execute('AirportParkingSystem.usp_GetParkingLotsForDropdown');
+    const rows = (result.recordset || []).map((row) => {
+      const parkingLotID = row.ParkingLotID ?? row.parkingLotID ?? row.LotID ?? row.lotID ?? null;
+      const lotName = row.LotName ?? row.lotName ?? row.ParkingLotName ?? row.parkingLotName ?? '';
+      return { parkingLotID, lotName };
+    });
+    return res.json({ success: true, data: rows });
+  } catch (error) {
+    console.error('Parking lots dropdown error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Sunucu hatası: ' + error.message
+    });
+  }
+});
+
+router.get('/vehicle-types', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const result = await pool.request().execute('AirportParkingSystem.usp_GetVehicleTypesForDropdown');
+    const rows = (result.recordset || []).map(row => ({
+      typeID: row.TypeID ?? row.typeID ?? row.typeId ?? null,
+      typeName: row.TypeName ?? row.typeName ?? ''
+    }));
+    return res.json({ success: true, data: rows });
+  } catch (error) {
+    console.error('Vehicle types error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'Sunucu hatası: ' + error.message
+    });
+  }
+});
+
+router.post('/entry', async (req, res) => {
+  try {
+    const db = require('../config/database');
+    const getPool = db.getPool;
+    const sql = db.sql;
+
+    const staffHeader = req.headers['x-user-id'] ?? req.headers['x-userid'] ?? req.headers['x_user_id'];
+    const staffUserId = staffHeader !== undefined ? parseInt(staffHeader) : NaN;
+    if (isNaN(staffUserId)) {
+      return res.status(401).json({ success: false, code: 'AUTH_REQUIRED', errorMessage: 'StaffUserID not found in auth context' });
+    }
+
+    const body = req.body || {};
+    const plateNumber = (body.plateNumber || '').toString().trim();
+    const typeId = body.typeId !== undefined ? parseInt(body.typeId) : NaN;
+    const ownerFullName = (body.ownerFullName || '').toString().trim();
+    const ownerPhone = (body.ownerPhone || '').toString().trim();
+    const parkingLotId = body.parkingLotId !== undefined ? parseInt(body.parkingLotId) : NaN;
+    const spotNumber = (body.spotNumber || '').toString().trim();
+
+    if (!plateNumber || isNaN(typeId) || !ownerFullName || !ownerPhone || isNaN(parkingLotId) || !spotNumber) {
+      return res.status(400).json({ success: false, code: 'VALIDATION_ERROR', errorMessage: 'Eksik veya hatalı alanlar' });
+    }
+
+    const pool = await getPool();
+    const request = pool.request();
+    request.input('StaffUserID', sql.Int, staffUserId);
+    request.input('PlateNumber', sql.VarChar(20), plateNumber);
+    request.input('TypeID', sql.Int, typeId);
+    request.input('OwnerFullName', sql.VarChar(200), ownerFullName);
+    request.input('OwnerPhone', sql.VarChar(50), ownerPhone);
+    request.input('ParkingLotID', sql.Int, parkingLotId);
+    request.input('SpotNumber', sql.VarChar(20), spotNumber);
+
+    const result = await request.execute('AirportParkingSystem.usp_CreateParkingEntry');
+    const row = (result.recordset && result.recordset[0]) ? result.recordset[0] : null;
+    if (!row) {
+      return res.status(500).json({ success: false, code: 'NO_RESULT', errorMessage: 'İşlem sonucu alınamadı' });
+    }
+    const success = (row.Success ?? row.success ?? 0) === true || (row.Success ?? 0) === 1;
+    if (!success) {
+      const errorCode = row.ErrorCode ?? row.errorCode ?? 0;
+      const errorMessage = row.ErrorMessage ?? row.errorMessage ?? 'İşlem başarısız';
+      return res.status(400).json({ success: false, code: errorCode, errorMessage });
+    }
+    return res.json({ success: true, data: row });
+  } catch (error) {
+    console.error('Create parking entry error:', error);
+    return res.status(500).json({ success: false, code: 'SERVER_ERROR', errorMessage: 'Sunucu hatası: ' + error.message });
+  }
+});
+
 // GET /api/parking/exit-popup-info?plateNumber=...
 router.get('/exit-popup-info', async (req, res) => {
   try {

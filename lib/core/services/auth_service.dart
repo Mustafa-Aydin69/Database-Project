@@ -113,6 +113,7 @@ class AuthService {
 
   // Şu anki rolü getir
   UserRole? get currentRole => _currentRole;
+  int? get currentUserId => _currentUserId;
 
   // ------------------------------------------------------------------
   // 3. YETKİ KONTROLÜ (ROUTER GUARD)
