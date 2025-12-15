@@ -118,6 +118,8 @@ class AdminService {
 
   static const String _addUserVehicleApiUrl =
       'http://localhost:3000/api/admin/add-user-vehicle';
+  static const String _parkingReservationsApiUrl =
+      'http://localhost:3000/api/admin/parking-reservations';
 
   /// Admin dashboard istatistiklerini getirir
   /// Başarılıysa AdminDashboardStats, başarısızsa empty stats döner
@@ -1294,6 +1296,50 @@ class AdminService {
     }
   }
 
+  /// Otopark rezervasyonlarını getirir
+  Future<List<ParkingReservation>> getParkingReservations() async {
+    try {
+      debugPrint('📡 Calling parking reservations API: $_parkingReservationsApiUrl');
+      final response = await http.get(
+        Uri.parse(_parkingReservationsApiUrl),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      // Response body'nin JSON olup olmadığını kontrol et
+      final contentType = response.headers['content-type'] ?? '';
+      if (!contentType.contains('application/json')) {
+        debugPrint('⚠️ Admin parking reservations API: JSON olmayan response alındı. Status: ${response.statusCode}, Content-Type: $contentType');
+        return [];
+      }
+
+      final responseBody = json.decode(response.body);
+
+      if (response.statusCode == 200 && responseBody['success'] == true) {
+        // API'den gelen data listesini ParkingReservation modeline dönüştür
+        final data = responseBody['data'] as List<dynamic>?;
+        debugPrint('📥 Admin parking reservations API: ${data?.length ?? 0} reservations retrieved');
+        if (data != null && data.isNotEmpty) {
+          debugPrint('📋 First reservation sample: ${data[0]}');
+          final reservations = data.map((item) => ParkingReservation.fromJson(item as Map<String, dynamic>)).toList();
+          debugPrint('✅ Parsed ${reservations.length} reservations successfully');
+          return reservations;
+        }
+        debugPrint('⚠️ API returned empty data array');
+        return [];
+      }
+
+      debugPrint('⚠️ API response not successful: status=${response.statusCode}, success=${responseBody['success']}');
+
+      // Hata durumunda boş liste döndür
+      debugPrint('⚠️ Admin parking reservations API hatası: ${response.statusCode}');
+      return [];
+    } catch (e) {
+      // Ağ bağlantısı hatası
+      debugPrint('❌ Admin parking reservations HTTP hatası: $e');
+      return [];
+    }
+  }
+
   /// Kullanıcı aracı günceller
   /// Başarılıysa true, başarısızsa false döner
   Future<bool> updateUserVehicle({
@@ -2203,6 +2249,113 @@ class VehicleType {
       typeName: json['TypeName'] as String?,
       priceMultiplier: (json['PriceMultiplier'] as num?)?.toDouble(),
     );
+  }
+}
+
+/// Otopark Rezervasyonu modeli
+class ParkingReservation {
+  final int? parkingReservationId;
+  final String? checkInTime;
+  final String? checkOutTime;
+  final String? status;
+  final int? userId;
+  final String? userName;
+  final String? userEmail;
+  final String? userPhone;
+  final int? spotId;
+  final String? spotNumber;
+  final bool? isReserved;
+  final int? parkingLotId;
+  final String? parkingLotName;
+  final int? parkingLotCapacity;
+  final String? parkingLotLocation;
+  final int? airportId;
+  final String? airportName;
+  final String? airportIATACode;
+  final String? airportCity;
+  final String? airportCountry;
+  final String? airportDisplayName;
+  final int? vehicleId;
+  final String? plateNumber;
+  final int? typeId;
+  final String? vehicleTypeName;
+  final double? vehiclePriceMultiplier;
+
+  ParkingReservation({
+    this.parkingReservationId,
+    this.checkInTime,
+    this.checkOutTime,
+    this.status,
+    this.userId,
+    this.userName,
+    this.userEmail,
+    this.userPhone,
+    this.spotId,
+    this.spotNumber,
+    this.isReserved,
+    this.parkingLotId,
+    this.parkingLotName,
+    this.parkingLotCapacity,
+    this.parkingLotLocation,
+    this.airportId,
+    this.airportName,
+    this.airportIATACode,
+    this.airportCity,
+    this.airportCountry,
+    this.airportDisplayName,
+    this.vehicleId,
+    this.plateNumber,
+    this.typeId,
+    this.vehicleTypeName,
+    this.vehiclePriceMultiplier,
+  });
+
+  factory ParkingReservation.fromJson(Map<String, dynamic> json) {
+    return ParkingReservation(
+      parkingReservationId: json['parkingReservationID'] as int?,
+      checkInTime: json['checkInTime']?.toString(),
+      checkOutTime: json['checkOutTime']?.toString(),
+      status: json['status'] as String?,
+      userId: json['userID'] as int?,
+      userName: json['userName'] as String?,
+      userEmail: json['userEmail'] as String?,
+      userPhone: json['userPhone'] as String?,
+      spotId: json['spotID'] as int?,
+      spotNumber: json['spotNumber'] as String?,
+      isReserved: json['isReserved'] as bool?,
+      parkingLotId: json['parkingLotID'] as int?,
+      parkingLotName: json['parkingLotName'] as String?,
+      parkingLotCapacity: json['parkingLotCapacity'] as int?,
+      parkingLotLocation: json['parkingLotLocation'] as String?,
+      airportId: json['airportID'] as int?,
+      airportName: json['airportName'] as String?,
+      airportIATACode: json['airportIATACode'] as String?,
+      airportCity: json['airportCity'] as String?,
+      airportCountry: json['airportCountry'] as String?,
+      airportDisplayName: json['airportDisplayName'] as String?,
+      vehicleId: json['vehicleID'] as int?,
+      plateNumber: json['plateNumber'] as String?,
+      typeId: json['typeID'] as int?,
+      vehicleTypeName: json['vehicleTypeName'] as String?,
+      vehiclePriceMultiplier: (json['vehiclePriceMultiplier'] as num?)?.toDouble(),
+    );
+  }
+
+  /// Map formatına dönüştür (UI için)
+  Map<String, dynamic> toMap() {
+    return {
+      'parkingReservationID': parkingReservationId,
+      'checkInTime': checkInTime,
+      'checkOutTime': checkOutTime,
+      'status': status,
+      'userID': userId,
+      'userName': userName,
+      'userEmail': userEmail,
+      'spotID': spotId,
+      'spotNumber': spotNumber,
+      'vehicleID': vehicleId,
+      'plateNumber': plateNumber,
+    };
   }
 }
 

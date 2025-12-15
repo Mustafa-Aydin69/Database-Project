@@ -2360,6 +2360,136 @@ router.get('/parking-spots', async (req, res) => {
 });
 
 /**
+ * GET /api/admin/parking-reservations
+ * Tüm otopark rezervasyonlarını getirir
+ * AirportParkingSystem.GetParkingReservations stored procedure'ünü çağırır
+ * ERD'ye göre: Parking_ParkingReservations -> Users, ParkingSpots, UserVehicles, VehicleTypes, ParkingLots, Airports (JOIN zinciri)
+ */
+router.get('/parking-reservations', async (req, res) => {
+  console.log('📥 GET /api/admin/parking-reservations endpoint called');
+  try {
+    const pool = await getPool();
+    const request = pool.request();
+
+    // Stored procedure'ü çağır
+    const result = await request.execute('AirportParkingSystem.GetParkingReservations');
+
+    console.log('🔍 Raw database result count:', result.recordset?.length || 0);
+    if (result.recordset && result.recordset.length > 0) {
+      console.log('🔍 Sample row keys:', Object.keys(result.recordset[0]));
+    }
+
+    if (!result.recordset || result.recordset.length === 0) {
+      console.log('⚠️ No parking reservations found in database');
+      return res.json({
+        success: true,
+        data: []
+      });
+    }
+
+    // Kolon isimlerini normalize et (case-insensitive)
+    const getValue = (obj, ...keys) => {
+      for (const key of keys) {
+        const foundKey = Object.keys(obj).find(k => k.toLowerCase() === key.toLowerCase());
+        if (foundKey && obj[foundKey] != null) {
+          return obj[foundKey];
+        }
+      }
+      return null;
+    };
+
+    // Rezervasyon listesini map et
+    const parkingReservations = result.recordset.map((row) => {
+      // Ana rezervasyon bilgileri
+      const parkingReservationId = getValue(row, 'ParkingReservationID', 'parkingReservationID', 'parking_reservation_id', 'ParkingReservationId', 'parkingReservationId', 'ID', 'Id', 'id');
+      const checkinTime = getValue(row, 'CheckinTime', 'checkinTime', 'checkin_time', 'CheckInTime', 'checkInTime');
+      const checkoutTime = getValue(row, 'CheckOutTime', 'checkOutTime', 'checkout_time', 'CheckoutTime');
+      const status = getValue(row, 'Status', 'status');
+
+      // Kullanıcı bilgileri
+      const userId = getValue(row, 'UserID', 'userID', 'user_id', 'UserId', 'userId');
+      const userName = getValue(row, 'UserName', 'userName', 'user_name', 'FullName', 'fullName');
+      const userEmail = getValue(row, 'UserEmail', 'userEmail', 'user_email', 'Email', 'email');
+      const userPhone = getValue(row, 'UserPhone', 'userPhone', 'user_phone', 'Phone', 'phone');
+
+      // Park yeri bilgileri
+      const spotId = getValue(row, 'SpotID', 'spotID', 'spot_id', 'SpotId', 'spotId');
+      const spotNumber = getValue(row, 'SpotNumber', 'spotNumber', 'spot_number', 'Number', 'number');
+      const isReserved = getValue(row, 'IsReserved', 'isReserved', 'is_reserved', 'Reserved', 'reserved');
+
+      // Otopark alanı bilgileri
+      const parkingLotId = getValue(row, 'ParkingLotID', 'parkingLotID', 'parking_lot_id', 'ParkingLotId', 'parkingLotId');
+      const parkingLotName = getValue(row, 'ParkingLotName', 'parkingLotName', 'parking_lot_name', 'LotName', 'lotName');
+      const parkingLotCapacity = getValue(row, 'ParkingLotCapacity', 'parkingLotCapacity', 'parking_lot_capacity', 'Capacity', 'capacity');
+      const parkingLotLocation = getValue(row, 'ParkingLotLocation', 'parkingLotLocation', 'parking_lot_location', 'Location', 'location');
+
+      // Havalimanı bilgileri
+      const airportId = getValue(row, 'AirportID', 'airportID', 'airport_id', 'AirportId', 'airportId');
+      const airportName = getValue(row, 'AirportName', 'airportName', 'airport_name');
+      const airportIATA = getValue(row, 'AirportIATACode', 'airportIATACode', 'airport_iata_code', 'IATA_Code', 'iata_code', 'IATA', 'iata');
+      const airportCity = getValue(row, 'AirportCity', 'airportCity', 'airport_city', 'City', 'city');
+      const airportCountry = getValue(row, 'AirportCountry', 'airportCountry', 'airport_country', 'Country', 'country');
+      const airportDisplayName = getValue(row, 'AirportDisplayName', 'airportDisplayName', 'airport_display_name')
+        || (airportIATA && airportName ? `${airportIATA} - ${airportName}` : airportName || 'Bilinmeyen Havalimanı');
+
+      // Araç bilgileri
+      const vehicleId = getValue(row, 'VehicleID', 'vehicleID', 'vehicle_id', 'VehicleId', 'vehicleId');
+      const plateNumber = getValue(row, 'PlateNumber', 'plateNumber', 'plate_number', 'Plate', 'plate');
+
+      // Araç tipi bilgileri
+      const typeId = getValue(row, 'TypeID', 'typeID', 'type_id', 'TypeId', 'typeId');
+      const vehicleTypeName = getValue(row, 'VehicleTypeName', 'vehicleTypeName', 'vehicle_type_name', 'TypeName', 'typeName');
+      const vehiclePriceMultiplier = getValue(row, 'VehiclePriceMultiplier', 'vehiclePriceMultiplier', 'vehicle_price_multiplier', 'PriceMultiplier', 'priceMultiplier');
+
+      return {
+        parkingReservationID: parkingReservationId || null,
+        checkInTime: checkinTime || null,
+        checkOutTime: checkoutTime || null,
+        status: status || null,
+        userID: userId || null,
+        userName: userName || null,
+        userEmail: userEmail || null,
+        userPhone: userPhone || null,
+        spotID: spotId || null,
+        spotNumber: spotNumber || null,
+        isReserved: isReserved === true || isReserved === 1 || isReserved === '1' || String(isReserved).toLowerCase() === 'true',
+        parkingLotID: parkingLotId || null,
+        parkingLotName: parkingLotName || null,
+        parkingLotCapacity: parkingLotCapacity != null ? parseInt(parkingLotCapacity) : null,
+        parkingLotLocation: parkingLotLocation || null,
+        airportID: airportId || null,
+        airportName: airportName || null,
+        airportIATACode: airportIATA || null,
+        airportCity: airportCity || null,
+        airportCountry: airportCountry || null,
+        airportDisplayName: airportDisplayName,
+        vehicleID: vehicleId || null,
+        plateNumber: plateNumber || null,
+        typeID: typeId || null,
+        vehicleTypeName: vehicleTypeName || null,
+        vehiclePriceMultiplier: vehiclePriceMultiplier != null ? parseFloat(vehiclePriceMultiplier) : null,
+      };
+    });
+
+    console.log('✅ Parking reservations retrieved:', parkingReservations.length, 'reservations');
+    if (parkingReservations.length > 0) {
+      console.log('📋 Sample parking reservation:', JSON.stringify(parkingReservations[0], null, 2));
+    }
+
+    res.json({
+      success: true,
+      data: parkingReservations
+    });
+  } catch (error) {
+    console.error('❌ Admin parking reservations error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Sunucu hatası: ' + error.message
+    });
+  }
+});
+
+/**
  * PUT /api/admin/update-parking-spot
  * Park yerini günceller (sadece IsReserved)
  * AirportParkingSystem.UpdateParkingSpot stored procedure'ünü çağırır
