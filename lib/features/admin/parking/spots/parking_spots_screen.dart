@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
+import '../../../../core/services/admin_service.dart';
+import '../../../../core/services/auth_service.dart';
 
 class ParkingSpotsScreen extends StatefulWidget {
   const ParkingSpotsScreen({super.key});
@@ -23,10 +25,32 @@ class Airport {
 
   @override
   String toString() => "$iata - $name";
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is Airport &&
+          runtimeType == other.runtimeType &&
+          id == other.id &&
+          name == other.name &&
+          city == other.city &&
+          iata == other.iata;
+
+  @override
+  int get hashCode =>
+      id.hashCode ^
+      name.hashCode ^
+      city.hashCode ^
+      iata.hashCode;
 }
 
 class _ParkingSpotsScreenState extends State<ParkingSpotsScreen> {
   // --- STATE ---
+  final AdminService _adminService = AdminService();
+  bool _isLoading = true;
+  List<ParkingSpot> _spots = [];
+  List<ParkingLot> _parkingLotsList = []; // Tüm otopark alanları (filtreleme için)
+  List<Airport> _airportsList = []; // Havalimanları cache (dropdown için)
   int _currentPage = 0;
   final int _itemsPerPage = 12; // Kartlar küçük, sayfada çok gösterebiliriz
   String _searchTerm = "";
@@ -41,192 +65,158 @@ class _ParkingSpotsScreenState extends State<ParkingSpotsScreen> {
   final TextEditingController _spotNumberController = TextEditingController();
   bool _isReserved = false;
 
-  // Sabit Listeler (Otoparklar)
-  final List<String> _parkingLots = [
-    'A Terminali Otopark',
-    'B Terminali Otopark',
-    'Açık Otopark',
-    'Kapalı Otopark',
-  ];
-  //Sabit Havalimanları
-  final List<Airport> airports = [
-    Airport(id: 1, name: "İstanbul Havalimanı", city: "İstanbul", iata: "IST"),
-    Airport(
-      id: 2,
-      name: "Sabiha Gökçen Havalimanı",
-      city: "İstanbul",
-      iata: "SAW",
-    ),
-    Airport(id: 3, name: "Esenboğa Havalimanı", city: "Ankara", iata: "ESB"),
-    Airport(
-      id: 4,
-      name: "İzmir Adnan Menderes Havalimanı",
-      city: "İzmir",
-      iata: "ADB",
-    ),
-    Airport(id: 5, name: "Milas-Bodrum Havalimanı", city: "Muğla", iata: "BJV"),
-    Airport(id: 6, name: "Dalaman Havalimanı", city: "Muğla", iata: "DLM"),
-    Airport(
-      id: 7,
-      name: "Denizli Çardak Havalimanı",
-      city: "Denizli",
-      iata: "DNZ",
-    ),
-    Airport(id: 8, name: "Uşak Havalimanı", city: "Uşak", iata: "USQ"),
-    Airport(id: 9, name: "Zafer Havalimanı", city: "Kütahya", iata: "KZR"),
-    Airport(id: 10, name: "Antalya Havalimanı", city: "Antalya", iata: "AYT"),
-    Airport(
-      id: 11,
-      name: "Gazipaşa-Alanya Havalimanı",
-      city: "Antalya",
-      iata: "GZP",
-    ),
-    Airport(
-      id: 12,
-      name: "Çukurova Uluslararası Havalimanı",
-      city: "Mersin",
-      iata: "COV",
-    ),
-    Airport(id: 13, name: "Kayseri Havalimanı", city: "Kayseri", iata: "ASR"),
-    Airport(id: 14, name: "Konya Havalimanı", city: "Konya", iata: "KYA"),
-    Airport(
-      id: 15,
-      name: "Nevşehir Kapadokya Havalimanı",
-      city: "Nevşehir",
-      iata: "NAV",
-    ),
-    Airport(
-      id: 16,
-      name: "Sivas Nuri Demirağ Havalimanı",
-      city: "Sivas",
-      iata: "VAS",
-    ),
-    Airport(id: 17, name: "Trabzon Havalimanı", city: "Trabzon", iata: "TZX"),
-    Airport(
-      id: 18,
-      name: "Samsun Çarşamba Havalimanı",
-      city: "Samsun",
-      iata: "SZF",
-    ),
-    Airport(id: 19, name: "Ordu-Giresun Havalimanı", city: "Ordu", iata: "OGU"),
-    Airport(id: 20, name: "Rize-Artvin Havalimanı", city: "Rize", iata: "RZV"),
-    Airport(id: 21, name: "Sinop Havalimanı", city: "Sinop", iata: "NOP"),
-    Airport(
-      id: 22,
-      name: "Kastamonu Havalimanı",
-      city: "Kastamonu",
-      iata: "KFS",
-    ),
-    Airport(id: 23, name: "Erzurum Havalimanı", city: "Erzurum", iata: "ERZ"),
-    Airport(
-      id: 24,
-      name: "Van Ferit Melen Havalimanı",
-      city: "Van",
-      iata: "VAN",
-    ),
-    Airport(
-      id: 25,
-      name: "Malatya Erhaç Havalimanı",
-      city: "Malatya",
-      iata: "MLX",
-    ),
-    Airport(id: 26, name: "Elazığ Havalimanı", city: "Elazığ", iata: "EZS"),
-    Airport(
-      id: 27,
-      name: "Muş Sultan Alparslan Havalimanı",
-      city: "Muş",
-      iata: "MSR",
-    ),
-    Airport(
-      id: 28,
-      name: "Kars Harakani Havalimanı",
-      city: "Kars",
-      iata: "KSY",
-    ),
-    Airport(
-      id: 29,
-      name: "Ağrı Ahmed-i Hani Havalimanı",
-      city: "Ağrı",
-      iata: "AJI",
-    ),
-    Airport(
-      id: 30,
-      name: "Gaziantep Havalimanı",
-      city: "Gaziantep",
-      iata: "GZT",
-    ),
-    Airport(
-      id: 31,
-      name: "Şanlıurfa GAP Havalimanı",
-      city: "Şanlıurfa",
-      iata: "GNY",
-    ),
-    Airport(
-      id: 32,
-      name: "Diyarbakır Havalimanı",
-      city: "Diyarbakır",
-      iata: "DIY",
-    ),
-    Airport(id: 33, name: "Batman Havalimanı", city: "Batman", iata: "BAL"),
-    Airport(
-      id: 34,
-      name: "Mardin Prof. Dr. Aziz Sancar Havalimanı",
-      city: "Mardin",
-      iata: "MQM",
-    ),
-    Airport(id: 35, name: "Siirt Havalimanı", city: "Siirt", iata: "SXZ"),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
 
-  // --- MOCK VERİLER (React'ten alındı) ---
-  List<Map<String, dynamic>> _spots = [
-    {
-      'spotID': 1,
-      'airportName': 'IST - İstanbul Havalimanı',
-      'parkingLotName': 'A Terminali Otopark',
-      'spotNumber': 'A-001',
-      'isReserved': true,
-    },
-    {
-      'spotID': 2,
-      'airportName': 'IST - İstanbul Havalimanı',
-      'parkingLotName': 'A Terminali Otopark',
-      'spotNumber': 'A-002',
-      'isReserved': false,
-    },
-    {
-      'spotID': 3,
-      'airportName': 'SAW - Sabiha Gökçen',
-      'parkingLotName': 'B Terminali Otopark',
-      'spotNumber': 'B-001',
-      'isReserved': false,
-    },
-    // Sayfalama için veri üretelim
-    ...List.generate(
-      10,
-      (index) => {
-        'spotID': 4 + index,
-        'airportName': index % 2 == 0
-            ? 'SAW - Sabiha Gökçen'
-            : 'IST - İstanbul Havalimanı',
-        'parkingLotName': 'Otopark ${index + 1}',
-        'spotNumber': 'C-${100 + index}',
-        'isReserved': index % 2 == 0 ? false : true,
-      },
-    ),
-  ];
+  /// Tüm verileri yükle (park yerleri + otopark alanları)
+  Future<void> _loadData() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      // Paralel olarak hem park yerlerini hem otopark alanlarını yükle
+      final results = await Future.wait([
+        _adminService.getParkingSpots(),
+        _adminService.getParkingLots(),
+      ]);
+
+      setState(() {
+        _spots = results[0] as List<ParkingSpot>;
+        _parkingLotsList = results[1] as List<ParkingLot>;
+        // Havalimanları listesini güncelle
+        _airportsList = _buildAirportsList(_parkingLotsList);
+        _isLoading = false;
+      });
+    } catch (e) {
+      debugPrint('❌ Error loading data: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  /// API'den park yerlerini yükle (sadece park yerleri için - liste yenileme)
+  Future<void> _loadParkingSpots() async {
+    try {
+      final parkingSpots = await _adminService.getParkingSpots();
+      setState(() {
+        _spots = parkingSpots;
+      });
+    } catch (e) {
+      debugPrint('❌ Error loading parking spots: $e');
+    }
+  }
+
+  // Otoparklar listesini tüm otopark alanlarından al (dinamik - tüm otoparklar)
+  List<String> get _parkingLots {
+    final lotList = <String>[];
+    for (var lot in _parkingLotsList) {
+      if (lot.lotName != null && lot.lotName!.isNotEmpty) {
+        lotList.add(lot.lotName!);
+      }
+    }
+    return lotList..sort();
+  }
+
+  // Seçilen havalimanına göre otoparkları filtrele (modal için)
+  List<String> get _filteredParkingLotsByAirport {
+    if (_selectedAirport == null) {
+      return _parkingLots; // Havalimanı seçilmemişse tüm otoparklar
+    }
+
+    final lotList = <String>[];
+    final selectedAirportId = _selectedAirport!.id;
+    
+    for (var lot in _parkingLotsList) {
+      if (lot.lotName != null && 
+          lot.lotName!.isNotEmpty &&
+          lot.airportId == selectedAirportId) {
+        lotList.add(lot.lotName!);
+      }
+    }
+    return lotList..sort();
+  }
+
+  // Otopark adından ParkingLotID'yi bul
+  int? _getParkingLotIdByName(String? lotName) {
+    if (lotName == null || lotName.isEmpty) return null;
+    
+    for (var lot in _parkingLotsList) {
+      if (lot.lotName == lotName) {
+        return lot.parkingLotId;
+      }
+    }
+    return null;
+  }
+
+  // Havalimanları listesini otopark alanlarından çıkar (dinamik - tüm havalimanları)
+  List<Airport> _buildAirportsList(List<ParkingLot> parkingLots) {
+    final airportMap = <int, Airport>{}; // AirportID -> Airport (unique için)
+    
+    for (var lot in parkingLots) {
+      if (lot.airportId != null && 
+          lot.airportName != null) {
+        // Havalimanı zaten eklenmemişse ekle
+        if (!airportMap.containsKey(lot.airportId)) {
+          // AirportName formatı: "IST - İstanbul Havalimanı" veya sadece "İstanbul Havalimanı"
+          String airportName = lot.airportName!;
+          String iataCode = lot.airportIATACode ?? '';
+          String airportCity = lot.airportCity ?? '';
+          
+          // Eğer IATA kodu yoksa, AirportName'den çıkarmaya çalış
+          if (iataCode.isEmpty) {
+            final parts = airportName.split(' - ');
+            if (parts.length == 2) {
+              iataCode = parts[0].trim();
+              airportName = parts[1].trim();
+            }
+          } else if (airportName.contains(' - ')) {
+            // Eğer AirportName formatında IATA varsa ve parse edilmemişse
+            final parts = airportName.split(' - ');
+            if (parts.length == 2 && parts[0].trim() == iataCode) {
+              // IATA kodunu zaten ayrı alan olarak aldık, sadece ismi temizle
+              airportName = parts[1].trim();
+            }
+          }
+          
+          airportMap[lot.airportId!] = Airport(
+            id: lot.airportId!,
+            name: airportName,
+            city: airportCity,
+            iata: iataCode,
+          );
+        }
+      }
+    }
+    
+    // Listeye çevir ve IATA koduna göre sırala
+    final airportList = airportMap.values.toList();
+    airportList.sort((a, b) {
+      // Önce IATA koduna göre sırala, yoksa isme göre
+      if (a.iata.isNotEmpty && b.iata.isNotEmpty) {
+        return a.iata.compareTo(b.iata);
+      }
+      return a.name.compareTo(b.name);
+    });
+    return airportList;
+  }
+
+  // Cached havalimanları listesi getter'ı
+  List<Airport> get _airports => _airportsList;
 
   // --- FİLTRELEME ---
-  List<Map<String, dynamic>> get _filteredSpots {
+  List<ParkingSpot> get _filteredSpots {
     return _spots.where((s) {
-      final matchesSearch = s['spotNumber'].toString().toLowerCase().contains(
-        _searchTerm.toLowerCase(),
-      );
-      final matchesLot =
-          _filterLot.isEmpty || s['parkingLotName'] == _filterLot;
+      final matchesSearch = (s.spotNumber?.toLowerCase().contains(_searchTerm.toLowerCase()) ?? false);
+      final matchesLot = _filterLot.isEmpty || s.parkingLotName == _filterLot;
 
       bool matchesStatus = true;
-      if (_filterStatus == 'available') matchesStatus = !s['isReserved'];
-      if (_filterStatus == 'reserved') matchesStatus = s['isReserved'];
+      if (_filterStatus == 'available') matchesStatus = s.isReserved != true;
+      if (_filterStatus == 'reserved') matchesStatus = s.isReserved == true;
 
       return matchesSearch && matchesLot && matchesStatus;
     }).toList();
@@ -234,16 +224,28 @@ class _ParkingSpotsScreenState extends State<ParkingSpotsScreen> {
 
   // --- CRUD İŞLEMLERİ ---
 
-  void _showSpotDialog({Map<String, dynamic>? spot}) {
-    if (spot != null) {
-      final int? airportId = spot['airportId'] as int?;
-      _selectedAirport = airportId == null
-          ? null
-          : airports.firstWhere((a) => a.id == airportId);
-      _selectedLot = spot['parkingLotName'];
-      _spotNumberController.text = spot['spotNumber'];
-      _isReserved = spot['isReserved'];
+  void _showSpotDialog({ParkingSpot? spot}) {
+    // Düzenleme modunda olup olmadığımızı kontrol eden değişken
+    final bool isEditing = spot != null;
+
+    if (isEditing) {
+      final parkingSpot = spot; // isEditing true ise spot null değil
+      final int? airportId = parkingSpot.airportId;
+      if (airportId != null) {
+        try {
+          _selectedAirport = _airports.firstWhere((a) => a.id == airportId);
+        } catch (e) {
+          debugPrint('⚠️ Airport not found in list for ID: $airportId');
+          _selectedAirport = null;
+        }
+      } else {
+        _selectedAirport = null;
+      }
+      _selectedLot = parkingSpot.parkingLotName;
+      _spotNumberController.text = parkingSpot.spotNumber ?? '';
+      _isReserved = parkingSpot.isReserved ?? false;
     } else {
+      _selectedAirport = null;
       _selectedLot = null;
       _spotNumberController.clear();
       _isReserved = false;
@@ -257,7 +259,7 @@ class _ParkingSpotsScreenState extends State<ParkingSpotsScreen> {
             shape: RoundedRectangleBorder(
               borderRadius: BorderRadius.circular(16),
             ),
-            title: Text(spot != null ? 'Park Yeri Düzenle' : 'Yeni Park Yeri'),
+            title: Text(isEditing ? 'Park Yeri Düzenle' : 'Yeni Park Yeri'),
             content: SizedBox(
               width: 400,
               child: SingleChildScrollView(
@@ -266,50 +268,83 @@ class _ParkingSpotsScreenState extends State<ParkingSpotsScreen> {
                   child: Column(
                     mainAxisSize: MainAxisSize.min,
                     children: [
+                      // --- HAVALİMANI (DÜZENLEME MODUNDA KİLİTLİ) ---
                       DropdownButtonFormField<Airport>(
-                        value: _selectedAirport,
-                        decoration: const InputDecoration(
+                        value: _selectedAirport != null 
+                            ? _airports.firstWhere(
+                                (a) => a.id == _selectedAirport!.id,
+                                orElse: () => _selectedAirport!,
+                              )
+                            : null,
+                        decoration: InputDecoration(
                           labelText: "Havalimanı",
-                          border: OutlineInputBorder(),
+                          border: const OutlineInputBorder(),
+                          filled: isEditing,
+                          fillColor: isEditing ? Colors.grey.shade200 : null,
                         ),
-                        items: airports.map((airport) {
+                        items: _airports.map((airport) {
                           return DropdownMenuItem<Airport>(
                             value: airport,
                             child: Text("${airport.iata} - ${airport.name}"),
                           );
                         }).toList(),
-                        onChanged: (val) =>
-                            setModalState(() => _selectedAirport = val),
+                        onChanged: isEditing ? null : (val) {
+                          if (val != null) {
+                            setModalState(() {
+                              // Dropdown'dan seçilen Airport objesini kullan (aynı referans)
+                              _selectedAirport = val;
+                              _selectedLot = null; // Havalimanı değişince otopark seçimini sıfırla
+                            });
+                          }
+                        },
                         validator: (v) =>
                             v == null ? "Havalimanı seçiniz" : null,
                       ),
-
+                      const SizedBox(height: 16),
+                      // --- OTOPARK (DÜZENLEME MODUNDA KİLİTLİ, EKLEME MODUNDA HAVALİMANINA GÖRE FİLTRELİ) ---
                       DropdownButtonFormField<String>(
                         value: _selectedLot,
-                        decoration: const InputDecoration(
+                        decoration: InputDecoration(
                           labelText: "Otopark",
-                          border: OutlineInputBorder(),
+                          border: const OutlineInputBorder(),
+                          filled: isEditing || (!isEditing && _selectedAirport == null),
+                          fillColor: isEditing || (!isEditing && _selectedAirport == null) 
+                              ? Colors.grey.shade200 
+                              : null,
+                          hintText: !isEditing && _selectedAirport == null 
+                              ? "Önce havalimanı seçiniz" 
+                              : null,
                         ),
-                        items: _parkingLots
+                        items: (isEditing ? _parkingLots : _filteredParkingLotsByAirport)
                             .map(
                               (l) => DropdownMenuItem(value: l, child: Text(l)),
                             )
                             .toList(),
-                        onChanged: (val) =>
-                            setModalState(() => _selectedLot = val),
+                        onChanged: isEditing || (!isEditing && _selectedAirport == null) 
+                            ? null 
+                            : (val) {
+                                setModalState(() {
+                                  _selectedLot = val;
+                                });
+                              },
                         validator: (v) => v == null ? "Seçiniz" : null,
                       ),
                       const SizedBox(height: 16),
+                      // --- PARK YERİ NO (DÜZENLEME MODUNDA KİLİTLİ) ---
                       TextFormField(
                         controller: _spotNumberController,
-                        decoration: const InputDecoration(
+                        enabled: !isEditing, // Düzenleme modunda değiştirilemez (disabled)
+                        decoration: InputDecoration(
                           labelText: "Park Yeri No",
-                          border: OutlineInputBorder(),
+                          border: const OutlineInputBorder(),
                           hintText: "Örn: A-001",
+                          filled: isEditing,
+                          fillColor: isEditing ? Colors.grey.shade200 : null,
                         ),
                         validator: (v) => v!.isEmpty ? "Zorunlu alan" : null,
                       ),
                       const SizedBox(height: 16),
+                      // --- REZERVE Mİ? (HER ZAMAN DÜZENLENEBİLİR) ---
                       CheckboxListTile(
                         title: const Text("Rezerve mi?"),
                         value: _isReserved,
@@ -333,32 +368,171 @@ class _ParkingSpotsScreenState extends State<ParkingSpotsScreen> {
                   backgroundColor: Colors.teal,
                   foregroundColor: Colors.white,
                 ),
-                onPressed: () {
-                  if (_formKey.currentState!.validate()) {
-                    setState(() {
-                      if (spot != null) {
-                        final index = _spots.indexWhere(
-                          (s) => s['spotID'] == spot['spotID'],
-                        );
-                        _spots[index] = {
-                          'spotID': spot['spotID'],
-                          'parkingLotName': _selectedLot,
-                          'spotNumber': _spotNumberController.text,
-                          'isReserved': _isReserved,
-                        };
-                      } else {
-                        _spots.insert(0, {
-                          'spotID': DateTime.now().millisecondsSinceEpoch,
-                          'parkingLotName': _selectedLot,
-                          'spotNumber': _spotNumberController.text,
-                          'isReserved': _isReserved,
-                        });
+                onPressed: () async {
+                  if (isEditing) {
+                    // Sadece IsReserved değişikliği için validasyon yok, direkt güncelleme yap
+                    final userId = AuthService().currentUserId;
+                    if (userId == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text("Kullanıcı kimliği bulunamadı. Lütfen tekrar giriş yapın."),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                      return;
+                    }
+
+                    final parkingSpot = spot; // isEditing true ise spot null değil
+
+                    // Loading dialog göster
+                    if (mounted) {
+                      showDialog(
+                        context: context,
+                        barrierDismissible: false,
+                        builder: (loadingContext) => const Center(child: CircularProgressIndicator()),
+                      );
+                    }
+
+                    try {
+                      final success = await _adminService.updateParkingSpot(
+                        spotId: parkingSpot.spotId!,
+                        isReserved: _isReserved,
+                        userId: userId,
+                      );
+
+                      // Loading dialog'u kapat
+                      if (mounted) {
+                        Navigator.of(context, rootNavigator: true).pop();
                       }
-                    });
-                    Navigator.pop(context);
+
+                      if (success) {
+                        // Dialog'u kapat
+                        Navigator.pop(context);
+                        // Başarılı mesajı göster
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Park yeri başarıyla güncellendi"),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                        // Listeyi yenile
+                        _loadParkingSpots();
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Park yeri güncellenirken bir hata oluştu"),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                    } catch (e) {
+                      // Loading dialog'u kapat
+                      if (mounted) {
+                        Navigator.of(context, rootNavigator: true).pop();
+                      }
+                      
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text("Hata: ${e.toString()}"),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                  } else {
+                    // Yeni ekleme modu
+                    if (_formKey.currentState!.validate()) {
+                      final userId = AuthService().currentUserId;
+                      if (userId == null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Kullanıcı kimliği bulunamadı. Lütfen tekrar giriş yapın."),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+
+                      // Seçilen otopark adından ParkingLotID'yi bul
+                      final parkingLotId = _getParkingLotIdByName(_selectedLot);
+                      if (parkingLotId == null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Otopark bilgisi bulunamadı. Lütfen geçerli bir otopark seçin."),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+
+                      if (_spotNumberController.text.trim().isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Park yeri numarası boş olamaz"),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+
+                      // Loading dialog göster
+                      if (mounted) {
+                        showDialog(
+                          context: context,
+                          barrierDismissible: false,
+                          builder: (loadingContext) => const Center(child: CircularProgressIndicator()),
+                        );
+                      }
+
+                      try {
+                        final result = await _adminService.addParkingSpot(
+                          parkingLotId: parkingLotId,
+                          spotNumber: _spotNumberController.text.trim(),
+                          isReserved: _isReserved,
+                          userId: userId,
+                        );
+
+                        // Loading dialog'u kapat
+                        if (mounted) {
+                          Navigator.of(context, rootNavigator: true).pop();
+                        }
+
+                        if (result['success'] == true) {
+                          // Dialog'u kapat
+                          Navigator.pop(context);
+                          // Başarılı mesajı göster
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text("Park yeri başarıyla eklendi"),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                          // Listeyi yenile
+                          _loadParkingSpots();
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(result['message'] ?? 'Park yeri eklenirken bir hata oluştu'),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        // Loading dialog'u kapat
+                        if (mounted) {
+                          Navigator.of(context, rootNavigator: true).pop();
+                        }
+                        
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text("Hata: ${e.toString()}"),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                    }
                   }
                 },
-                child: Text(spot != null ? "Güncelle" : "Ekle"),
+                child: Text(isEditing ? "Güncelle" : "Ekle"),
               ),
             ],
           );
@@ -367,8 +541,20 @@ class _ParkingSpotsScreenState extends State<ParkingSpotsScreen> {
     );
   }
 
-  void _deleteSpot(int id) {
-    showDialog(
+  void _deleteSpot(int id) async {
+    final userId = AuthService().currentUserId;
+    if (userId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Kullanıcı kimliği bulunamadı. Lütfen tekrar giriş yapın."),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // Onay modalı göster
+    final shouldDelete = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text("Emin misiniz?"),
@@ -377,32 +563,166 @@ class _ParkingSpotsScreenState extends State<ParkingSpotsScreen> {
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(context, false),
             child: const Text("İptal"),
           ),
           TextButton(
-            onPressed: () {
-              setState(() => _spots.removeWhere((s) => s['spotID'] == id));
-              Navigator.pop(context);
-            },
+            onPressed: () => Navigator.pop(context, true),
             child: const Text("Sil", style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
     );
+
+    if (shouldDelete != true) {
+      return; // Kullanıcı iptal etti
+    }
+
+    // Loading dialog göster
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (loadingContext) => const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    try {
+      final success = await _adminService.deleteParkingSpot(
+        spotId: id,
+        userId: userId,
+      );
+
+      // Loading dialog'u kapat
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+
+      if (success) {
+        // Başarılı mesajı göster
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Park yeri başarıyla silindi"),
+            backgroundColor: Colors.green,
+          ),
+        );
+        // Listeyi yenile
+        _loadParkingSpots();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Park yeri silinirken bir hata oluştu"),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      // Loading dialog'u kapat
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Hata: ${e.toString()}"),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
-  void _toggleStatus(int id) {
-    setState(() {
-      final index = _spots.indexWhere((s) => s['spotID'] == id);
-      if (index != -1) {
-        _spots[index]['isReserved'] = !_spots[index]['isReserved'];
+  void _toggleStatus(int id) async {
+    // Park yerini bul
+    ParkingSpot? spot;
+    try {
+      spot = _spots.firstWhere((s) => s.spotId == id);
+    } catch (e) {
+      // Park yeri bulunamadı
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Park yeri bulunamadı"),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // Yeni durum
+    final newStatus = !(spot.isReserved ?? false);
+
+    final userId = AuthService().currentUserId;
+    if (userId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Kullanıcı kimliği bulunamadı. Lütfen tekrar giriş yapın."),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // Loading dialog göster
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (loadingContext) => const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    try {
+      final success = await _adminService.updateParkingSpot(
+        spotId: id,
+        isReserved: newStatus,
+        userId: userId,
+      );
+
+      // Loading dialog'u kapat
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
       }
-    });
+
+      if (success) {
+        // Başarılı mesajı göster
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(newStatus ? "Park yeri rezerve edildi" : "Park yeri rezervasyonu kaldırıldı"),
+            backgroundColor: Colors.green,
+          ),
+        );
+        // Listeyi yenile
+        _loadParkingSpots();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Park yeri durumu güncellenirken bir hata oluştu"),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      // Loading dialog'u kapat
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Hata: ${e.toString()}"),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: const Color(0xFFF9FAFB),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
     final filtered = _filteredSpots;
     final totalPages = (filtered.length / _itemsPerPage).ceil();
     if (_currentPage >= totalPages && totalPages > 0)
@@ -589,9 +909,9 @@ class _ParkingSpotsScreenState extends State<ParkingSpotsScreen> {
                         spot: currentData[index],
                         onEdit: () => _showSpotDialog(spot: currentData[index]),
                         onDelete: () =>
-                            _deleteSpot(currentData[index]['spotID']),
+                            _deleteSpot(currentData[index].spotId ?? 0),
                         onToggleStatus: () =>
-                            _toggleStatus(currentData[index]['spotID']),
+                            _toggleStatus(currentData[index].spotId ?? 0),
                       );
                     },
                   );
@@ -627,7 +947,7 @@ class _ParkingSpotsScreenState extends State<ParkingSpotsScreen> {
 
 // --- PARK YERİ KARTI ---
 class _ParkingSpotCard extends StatelessWidget {
-  final Map<String, dynamic> spot;
+  final ParkingSpot spot;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final VoidCallback onToggleStatus;
@@ -641,7 +961,7 @@ class _ParkingSpotCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final bool isReserved = spot['isReserved'];
+    final bool isReserved = spot.isReserved ?? false;
     final Color statusColor = isReserved ? Colors.red : Colors.green;
     final String statusText = isReserved ? 'Rezerve' : 'Müsait';
 
@@ -663,7 +983,7 @@ class _ParkingSpotCard extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                spot['spotNumber'],
+                spot.spotNumber ?? 'N/A',
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 18,
@@ -702,7 +1022,7 @@ class _ParkingSpotCard extends StatelessWidget {
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  spot['parkingLotName'],
+                  spot.parkingLotName ?? 'N/A',
                   style: TextStyle(fontSize: 12, color: Colors.grey.shade700),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
@@ -718,7 +1038,7 @@ class _ParkingSpotCard extends StatelessWidget {
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  spot['airportName'],
+                  spot.airportDisplayName ?? spot.airportName ?? 'N/A',
                   style: TextStyle(fontSize: 11, color: Colors.grey.shade600),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,

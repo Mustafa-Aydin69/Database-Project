@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
 import 'package:intl/intl.dart';
+import '../../../core/services/parking_service.dart';
+import '../../../core/services/auth_service.dart';
 
 class ParkingReservationsScreen extends StatefulWidget {
   const ParkingReservationsScreen({super.key});
@@ -11,6 +13,9 @@ class ParkingReservationsScreen extends StatefulWidget {
 
 class _ParkingReservationsScreenState extends State<ParkingReservationsScreen> {
   // --- STATE ---
+  final ParkingService _parkingService = ParkingService();
+  bool _isLoading = true;
+  List<ParkingReservation> _reservations = [];
   int _currentPage = 0;
   final int _itemsPerPage = 10;
   String _searchTerm = "";
@@ -28,63 +33,173 @@ class _ParkingReservationsScreenState extends State<ParkingReservationsScreen> {
   // Sabit Listeler
   final List<String> _statuses = ['active', 'completed', 'cancelled', 'pending'];
 
-  // --- MOCK VERİLER ---
-  List<Map<String, dynamic>> _reservations = [
-    {
-      'id': 'RES-001', 'plateNumber': '34 ABC 123', 'airport': 'İstanbul Havalimanı (IST)',
-      'parkingLot': 'A Terminali Otopark', 'spotCode': 'A-15', 'customerName': 'Ahmet Yılmaz',
-      'phone': '+90 532 123 4567', 'startDate': '2024-01-15 10:00', 'endDate': '2024-01-20 14:00',
-      'vehicleType': 'Sedan', 'status': 'active', 'amount': 750
-    },
-    {
-      'id': 'RES-002', 'plateNumber': '06 XYZ 789', 'airport': 'Esenboğa Havalimanı (ESB)',
-      'parkingLot': 'Terminal Otopark', 'spotCode': 'B-08', 'customerName': 'Ayşe Demir',
-      'phone': '+90 533 987 6543', 'startDate': '2024-01-16 08:30', 'endDate': '2024-01-18 16:00',
-      'vehicleType': 'SUV', 'status': 'active', 'amount': 450
-    },
-    {
-      'id': 'RES-003', 'plateNumber': '35 DEF 456', 'airport': 'Sabiha Gökçen (SAW)',
-      'parkingLot': 'Kapalı Otopark', 'spotCode': 'C-22', 'customerName': 'Mehmet Kaya',
-      'phone': '+90 534 555 1234', 'startDate': '2024-01-10 12:00', 'endDate': '2024-01-14 10:00',
-      'vehicleType': 'Sedan', 'status': 'completed', 'amount': 600
-    },
-    // Sayfalama verisi
-    ...List.generate(15, (index) => {
-      'id': 'RES-${100 + index}',
-      'plateNumber': '34 TES ${100 + index}',
-      'airport': 'İstanbul Havalimanı (IST)',
-      'parkingLot': 'Genel Otopark',
-      'spotCode': 'P-${index + 1}',
-      'customerName': 'Misafir ${index + 1}',
-      'phone': '+90 555 000 ${1000 + index}',
-      'startDate': '2024-01-${10 + index} 10:00',
-      'endDate': '2024-01-${12 + index} 14:00',
-      'vehicleType': 'Sedan',
-      'status': index % 2 == 0 ? 'active' : 'completed',
-      'amount': 300 + (index * 20)
-    }),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _loadReservations();
+  }
+
+  /// API'den rezervasyon listesini yükle
+  Future<void> _loadReservations() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final reservations = await _parkingService.getReservationList();
+      debugPrint('📥 Reservations loaded: ${reservations.length} items');
+      
+      setState(() {
+        _reservations = reservations;
+        _isLoading = false;
+      });
+    } catch (e) {
+      debugPrint('❌ Error loading reservations: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
 
   // --- FİLTRELEME ---
-  List<Map<String, dynamic>> get _filteredReservations {
+  List<ParkingReservation> get _filteredReservations {
     return _reservations.where((r) {
-      final matchesSearch = r['plateNumber'].toLowerCase().contains(_searchTerm.toLowerCase()) ||
-          r['customerName'].toLowerCase().contains(_searchTerm.toLowerCase()) ||
-          r['id'].toLowerCase().contains(_searchTerm.toLowerCase());
+      final matchesSearch = r.plateNumber.toLowerCase().contains(_searchTerm.toLowerCase()) ||
+          r.customerName.toLowerCase().contains(_searchTerm.toLowerCase()) ||
+          r.reservationNo.toLowerCase().contains(_searchTerm.toLowerCase());
 
-      final matchesStatus = _filterStatus == 'all' || r['status'] == _filterStatus;
+      final matchesStatus = _filterStatus == 'all' || r.status == _filterStatus;
 
       return matchesSearch && matchesStatus;
     }).toList();
   }
 
+  /// ISO tarih string'ini okunabilir formata çevir
+  String _formatDateTime(String isoString) {
+    if (isoString.isEmpty) return '';
+    try {
+      final date = DateTime.parse(isoString);
+      return DateFormat('yyyy-MM-dd HH:mm').format(date);
+    } catch (e) {
+      return isoString;
+    }
+  }
+
+  /// Rezervasyon güncelleme işlemini yapar
+  Future<void> _handleUpdateReservation(ParkingReservation reservation, BuildContext dialogContext) async {
+    if (!_formKey.currentState!.validate()) {
+      return;
+    }
+
+    // AuthService'den mevcut kullanıcı ID'sini al
+    final authService = AuthService();
+    final actionUserId = authService.currentUserId;
+
+    if (actionUserId == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Kullanıcı bilgisi bulunamadı. Lütfen tekrar giriş yapın.'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+
+    // Loading göster (root navigator kullan)
+    bool loadingDialogShown = false;
+    if (mounted) {
+      showDialog(
+        context: dialogContext,
+        barrierDismissible: false,
+        useRootNavigator: true,
+        builder: (loadingContext) => const Center(
+          child: CircularProgressIndicator(),
+        ),
+      );
+      loadingDialogShown = true;
+    }
+
+    try {
+      // API'yi çağır
+      final success = await _parkingService.updateReservation(
+        reservationCode: reservation.reservationNo, // "RES-12" formatında
+        plateNumber: _plateController.text.trim(),
+        fullName: _customerNameController.text.trim(),
+        phone: _phoneController.text.trim(),
+        status: _selectedStatus,
+        actionUserId: actionUserId,
+      );
+
+      // Loading dialog'u kapat (root navigator kullan)
+      if (mounted && loadingDialogShown) {
+        Navigator.of(dialogContext, rootNavigator: true).pop();
+        loadingDialogShown = false;
+      }
+
+      if (success) {
+        // Form dialog'u kapat (root navigator ile açıldığı için root navigator ile kapat)
+        if (mounted) {
+          Navigator.of(dialogContext, rootNavigator: true).pop();
+        }
+
+        // Başarılı mesajı göster
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Rezervasyon başarıyla güncellendi'),
+              backgroundColor: Colors.green,
+            ),
+          );
+        }
+
+        // Verileri yeniden yükle
+        await _loadReservations();
+      } else {
+        // Hata mesajı göster (form dialog açık kalır)
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text('Rezervasyon güncellenirken bir hata oluştu'),
+              backgroundColor: Colors.red,
+            ),
+          );
+        }
+      }
+    } catch (e) {
+      debugPrint('❌ Error updating reservation: $e');
+      
+      // Loading dialog'u kapat (eğer açıldıysa)
+      if (mounted && loadingDialogShown) {
+        Navigator.of(dialogContext, rootNavigator: true).pop();
+        loadingDialogShown = false;
+      }
+
+      // Hata mesajı göster (form dialog açık kalır)
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Hata: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
+  }
+
   // --- CRUD İŞLEMLERİ ---
   Future<void> _selectDateTime(BuildContext context, TextEditingController controller) async {
+    final now = DateTime.now();
+    final safeInitialDate = now.isAfter(DateTime(2030, 12, 31))
+        ? DateTime(2030, 12, 31)
+        : now;
+    
     final DateTime? pickedDate = await showDatePicker(
       context: context,
-      initialDate: DateTime.now(),
+      initialDate: safeInitialDate,
       firstDate: DateTime(2023),
-      lastDate: DateTime(2025),
+      lastDate: DateTime(2030, 12, 31),
     );
     if (pickedDate != null) {
       final TimeOfDay? pickedTime = await showTimePicker(
@@ -98,14 +213,14 @@ class _ParkingReservationsScreenState extends State<ParkingReservationsScreen> {
     }
   }
 
-  void _showReservationDialog({Map<String, dynamic>? reservation}) {
+  void _showReservationDialog({ParkingReservation? reservation}) {
     if (reservation != null) {
-      _plateController.text = reservation['plateNumber'];
-      _customerNameController.text = reservation['customerName'];
-      _phoneController.text = reservation['phone'];
-      _startDateController.text = reservation['startDate'];
-      _endDateController.text = reservation['endDate'];
-      _selectedStatus = reservation['status'];
+      _plateController.text = reservation.plateNumber;
+      _customerNameController.text = reservation.customerName;
+      _phoneController.text = reservation.phone;
+      _startDateController.text = _formatDateTime(reservation.startTime);
+      _endDateController.text = _formatDateTime(reservation.endTime);
+      _selectedStatus = reservation.status;
     } else {
       _plateController.clear();
       _customerNameController.clear();
@@ -117,7 +232,8 @@ class _ParkingReservationsScreenState extends State<ParkingReservationsScreen> {
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      useRootNavigator: true,
+      builder: (dialogContext) => AlertDialog(
         title: Text(reservation != null ? 'Rezervasyon Düzenle' : 'Yeni Rezervasyon'),
         content: SizedBox(
           width: 400,
@@ -170,42 +286,10 @@ class _ParkingReservationsScreenState extends State<ParkingReservationsScreen> {
           ),
         ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
+          TextButton(onPressed: () => Navigator.pop(dialogContext), child: const Text("İptal")),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white),
-            onPressed: () {
-              if (_formKey.currentState!.validate()) {
-                setState(() {
-                  if (reservation != null) {
-                    final index = _reservations.indexWhere((r) => r['id'] == reservation['id']);
-                    _reservations[index] = {
-                      ..._reservations[index],
-                      'plateNumber': _plateController.text,
-                      'customerName': _customerNameController.text,
-                      'phone': _phoneController.text,
-                      'startDate': _startDateController.text,
-                      'endDate': _endDateController.text,
-                      'status': _selectedStatus,
-                    };
-                  } else {
-                    _reservations.insert(0, {
-                      'id': 'RES-${DateTime.now().millisecondsSinceEpoch}',
-                      'plateNumber': _plateController.text,
-                      'customerName': _customerNameController.text,
-                      'phone': _phoneController.text,
-                      'startDate': _startDateController.text,
-                      'endDate': _endDateController.text,
-                      'status': _selectedStatus,
-                      'amount': 0, // Yeni kayıtta hesaplanabilir
-                      'airport': 'İstanbul Havalimanı (IST)', // Varsayılan
-                      'parkingLot': 'Genel',
-                      'spotCode': 'P-Temp'
-                    });
-                  }
-                });
-                Navigator.pop(context);
-              }
-            },
+            onPressed: reservation != null ? () => _handleUpdateReservation(reservation, dialogContext) : null,
             child: Text(reservation != null ? "Güncelle" : "Oluştur"),
           ),
         ],
@@ -213,31 +297,77 @@ class _ParkingReservationsScreenState extends State<ParkingReservationsScreen> {
     );
   }
 
-  void _showDetailDialog(Map<String, dynamic> reservation) {
+  void _showDetailDialog(ParkingReservation reservation) {
+    final currencyFormat = NumberFormat.currency(locale: 'tr_TR', symbol: '₺');
+    
     showDialog(
       context: context,
+      useRootNavigator: true,
       builder: (context) => AlertDialog(
-        title: const Text("Rezervasyon Detayları"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
+        title: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            _DetailRow("Rezervasyon No", reservation['id']),
-            _DetailRow("Plaka", reservation['plateNumber']),
-            _DetailRow("Müşteri", reservation['customerName']),
-            _DetailRow("Telefon", reservation['phone']),
-            _DetailRow("Park Yeri", "${reservation['parkingLot']} - ${reservation['spotCode']}"),
-            _DetailRow("Başlangıç", reservation['startDate']),
-            _DetailRow("Bitiş", reservation['endDate']),
-            _DetailRow("Tutar", "${reservation['amount']} ₺", isBold: true, color: Colors.teal),
-            _DetailRow("Durum", reservation['status'], isBold: true),
+            const Text("Rezervasyon Detayları"),
+            IconButton(
+              icon: const Icon(Icons.close),
+              onPressed: () => Navigator.pop(context),
+            ),
           ],
         ),
+        content: SizedBox(
+          width: 400,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _DetailRow("Rezervasyon No", reservation.reservationNo),
+                _DetailRow("Plaka", reservation.plateNumber),
+                _DetailRow("Müşteri", reservation.customerName),
+                _DetailRow("Telefon", reservation.phone),
+                _DetailRow("Park Yeri", reservation.parkingSpot),
+                _DetailRow("Başlangıç", _formatDateTime(reservation.startTime)),
+                _DetailRow("Bitiş", _formatDateTime(reservation.endTime)),
+                _DetailRow("Ödeme Yöntemi", reservation.paymentMethod),
+                const Divider(),
+                _DetailRow("Tutar", currencyFormat.format(reservation.amount), isBold: true, color: Colors.teal),
+                _DetailRow("Durum", reservation.status, isBold: true, color: _getStatusColor(reservation.status)),
+              ],
+            ),
+          ),
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("Kapat")),
+          SizedBox(
+            width: double.infinity,
+            child: ElevatedButton(
+              onPressed: () => Navigator.pop(context),
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.orange,
+                foregroundColor: Colors.white,
+              ),
+              child: const Text("Kapat"),
+            ),
+          ),
         ],
       ),
     );
+  }
+
+  /// Status'a göre renk döndürür
+  Color _getStatusColor(String status) {
+    switch (status.toLowerCase()) {
+      case 'active':
+        return Colors.green;
+      case 'completed':
+        return Colors.grey;
+      case 'cancelled':
+      case 'canceled':
+        return Colors.red;
+      case 'pending':
+        return Colors.orange;
+      default:
+        return Colors.blue;
+    }
   }
 
   @override
@@ -326,32 +456,41 @@ class _ParkingReservationsScreenState extends State<ParkingReservationsScreen> {
             const SizedBox(height: 24),
 
             // --- KART LİSTESİ ---
-            if (currentData.isEmpty)
-              const Center(child: Padding(padding: EdgeInsets.all(40), child: Text("Rezervasyon bulunamadı.")))
-            else
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  int crossAxisCount = constraints.maxWidth > 1100 ? 3 : (constraints.maxWidth > 700 ? 2 : 1);
-                  return GridView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: crossAxisCount,
-                      crossAxisSpacing: 16,
-                      mainAxisSpacing: 16,
-                      childAspectRatio: 1.6,
-                    ),
-                    itemCount: currentData.length,
-                    itemBuilder: (context, index) {
-                      return _ReservationCard(
-                        reservation: currentData[index],
-                        onEdit: () => _showReservationDialog(reservation: currentData[index]),
-                        onView: () => _showDetailDialog(currentData[index]),
-                      );
-                    },
-                  );
-                },
-              ),
+            _isLoading
+                ? const Center(
+                    child: Padding(
+                        padding: EdgeInsets.all(40),
+                        child: CircularProgressIndicator()))
+                : currentData.isEmpty
+                    ? const Center(
+                        child: Padding(
+                            padding: EdgeInsets.all(40),
+                            child: Text("Rezervasyon bulunamadı.")))
+                    : LayoutBuilder(
+                        builder: (context, constraints) {
+                          int crossAxisCount = constraints.maxWidth > 1100
+                              ? 3
+                              : (constraints.maxWidth > 700 ? 2 : 1);
+                          return GridView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: crossAxisCount,
+                              crossAxisSpacing: 16,
+                              mainAxisSpacing: 16,
+                              childAspectRatio: 1.6,
+                            ),
+                            itemCount: currentData.length,
+                            itemBuilder: (context, index) {
+                              return _ReservationCard(
+                                reservation: currentData[index],
+                                onEdit: () => _showReservationDialog(reservation: currentData[index]), // Edit için form dialog
+                                onView: () => _showDetailDialog(currentData[index]),
+                              );
+                            },
+                          );
+                        },
+                      ),
 
             // --- SAYFALAMA ---
             const SizedBox(height: 20),
@@ -372,24 +511,42 @@ class _ParkingReservationsScreenState extends State<ParkingReservationsScreen> {
 
 // --- KART WIDGETLARI ---
 class _ReservationCard extends StatelessWidget {
-  final Map<String, dynamic> reservation;
+  final ParkingReservation reservation;
   final VoidCallback onEdit;
   final VoidCallback onView;
 
   const _ReservationCard({required this.reservation, required this.onEdit, required this.onView});
 
   Color _getStatusColor(String status) {
-    switch (status) {
-      case 'active': return Colors.green;
-      case 'completed': return Colors.grey;
-      case 'cancelled': return Colors.red;
-      default: return Colors.blue;
+    switch (status.toLowerCase()) {
+      case 'active':
+        return Colors.green;
+      case 'completed':
+        return Colors.grey;
+      case 'cancelled':
+      case 'canceled':
+        return Colors.red;
+      case 'pending':
+        return Colors.orange;
+      default:
+        return Colors.blue;
+    }
+  }
+
+  String _formatDateTime(String isoString) {
+    if (isoString.isEmpty) return '';
+    try {
+      final date = DateTime.parse(isoString);
+      return DateFormat('yyyy-MM-dd HH:mm').format(date);
+    } catch (e) {
+      return isoString;
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final statusColor = _getStatusColor(reservation['status']);
+    final statusColor = _getStatusColor(reservation.status);
+    final currencyFormat = NumberFormat.currency(locale: 'tr_TR', symbol: '₺');
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -406,30 +563,63 @@ class _ReservationCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(reservation['plateNumber'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(reservation.plateNumber,
+                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                    Text(reservation.reservationNo,
+                        style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                  ],
+                ),
+              ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(color: statusColor.withOpacity(0.1), borderRadius: BorderRadius.circular(8)),
-                child: Text(reservation['status'], style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: statusColor)),
+                decoration: BoxDecoration(
+                    color: statusColor.withOpacity(0.1),
+                    borderRadius: BorderRadius.circular(8)),
+                child: Text(reservation.status,
+                    style: TextStyle(
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                        color: statusColor)),
               ),
             ],
           ),
 
           const Divider(height: 16),
 
-          _InfoRow(label: "Müşteri", value: reservation['customerName']),
-          _InfoRow(label: "Park Yeri", value: reservation['spotCode']),
-          _InfoRow(label: "Giriş", value: reservation['startDate']),
-          _InfoRow(label: "Çıkış", value: reservation['endDate']),
+          _InfoRow(label: "Müşteri", value: reservation.customerName),
+          _InfoRow(label: "Park Yeri", value: reservation.parkingSpot),
+          _InfoRow(label: "Başlangıç", value: _formatDateTime(reservation.startTime)),
+          _InfoRow(label: "Bitiş", value: _formatDateTime(reservation.endTime)),
+          const SizedBox(height: 4),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text("Tutar:",
+                  style: TextStyle(fontSize: 12, color: Colors.grey.shade600)),
+              Text(currencyFormat.format(reservation.amount),
+                  style: const TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.teal)),
+            ],
+          ),
 
           const SizedBox(height: 8),
 
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
-              InkWell(onTap: onView, child: const Icon(Icons.visibility, size: 20, color: Colors.blue)),
+              InkWell(
+                  onTap: onView,
+                  child: const Icon(Icons.visibility, size: 20, color: Colors.blue)),
               const SizedBox(width: 16),
-              InkWell(onTap: onEdit, child: const Icon(Icons.edit, size: 20, color: Colors.orange)),
+              InkWell(
+                  onTap: onEdit,
+                  child: const Icon(Icons.edit, size: 20, color: Colors.orange)),
             ],
           ),
         ],
@@ -468,10 +658,24 @@ class _DetailRow extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4.0),
       child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(label, style: const TextStyle(color: Colors.grey)),
-          Text(value, style: TextStyle(fontWeight: isBold ? FontWeight.bold : FontWeight.normal, color: color ?? Colors.black87)),
+          SizedBox(
+            width: 120,
+            child: Text(label, style: const TextStyle(color: Colors.grey)),
+          ),
+          Expanded(
+            child: Text(
+              value,
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontWeight: isBold ? FontWeight.bold : FontWeight.normal,
+                color: color ?? Colors.black87,
+              ),
+              maxLines: 3,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
         ],
       ),
     );

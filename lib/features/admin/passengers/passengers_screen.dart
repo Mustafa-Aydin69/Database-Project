@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
+import '../../../core/services/admin_service.dart';
+import '../../../core/services/auth_service.dart';
 
 class PassengersScreen extends StatefulWidget {
   const PassengersScreen({super.key});
@@ -10,6 +12,10 @@ class PassengersScreen extends StatefulWidget {
 
 class _PassengersScreenState extends State<PassengersScreen> {
   // --- STATE ---
+  final AdminService _adminService = AdminService();
+  bool _isLoading = true;
+  List<Passenger> _passengers = [];
+  List<Reservation> _reservations = [];
   int _currentPage = 0;
   final int _itemsPerPage = 10;
 
@@ -21,36 +27,73 @@ class _PassengersScreenState extends State<PassengersScreen> {
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _passportController = TextEditingController();
   final TextEditingController _nationalityController = TextEditingController();
+  final TextEditingController _ageController = TextEditingController();
+  String? _selectedGender;
+  int? _selectedReservationId;
 
-  // --- MOCK VERİLER (React'ten alındı) ---
-  List<Map<String, dynamic>> _passengers = [
-    {'id': 1, 'firstName': 'Ahmet', 'lastName': 'Yılmaz', 'email': 'ahmet.yilmaz@email.com', 'phone': '+90 532 123 4567', 'passportNumber': 'U12345678', 'nationality': 'Türkiye'},
-    {'id': 2, 'firstName': 'Ayşe', 'lastName': 'Demir', 'email': 'ayse.demir@email.com', 'phone': '+90 533 234 5678', 'passportNumber': 'U23456789', 'nationality': 'Türkiye'},
-    {'id': 3, 'firstName': 'John', 'lastName': 'Smith', 'email': 'john.smith@email.com', 'phone': '+1 555 345 6789', 'passportNumber': 'P34567890', 'nationality': 'USA'},
-    {'id': 4, 'firstName': 'Maria', 'lastName': 'Garcia', 'email': 'maria.garcia@email.com', 'phone': '+34 612 456 7890', 'passportNumber': 'E45678901', 'nationality': 'Spain'},
-    {'id': 5, 'firstName': 'Mehmet', 'lastName': 'Kaya', 'email': 'mehmet.kaya@email.com', 'phone': '+90 534 567 8901', 'passportNumber': 'U56789012', 'nationality': 'Türkiye'},
-    // Sayfalama için veri çoğaltalım
-    ...List.generate(15, (index) => {
-      'id': 6 + index,
-      'firstName': 'Yolcu',
-      'lastName': '${index + 1}',
-      'email': 'yolcu${index + 1}@email.com',
-      'phone': '+90 555 000 ${1000 + index}',
-      'passportNumber': 'X${100000 + index}',
-      'nationality': index % 3 == 0 ? 'Almanya' : 'Türkiye'
-    }),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _loadPassengers();
+    _loadReservations();
+  }
+
+  /// API'den rezervasyonları yükle (dropdown için)
+  Future<void> _loadReservations() async {
+    try {
+      final reservations = await _adminService.getReservations();
+      setState(() {
+        _reservations = reservations;
+      });
+    } catch (e) {
+      debugPrint('❌ Error loading reservations: $e');
+    }
+  }
+
+  @override
+  void dispose() {
+    _firstNameController.dispose();
+    _lastNameController.dispose();
+    _emailController.dispose();
+    _phoneController.dispose();
+    _passportController.dispose();
+    _nationalityController.dispose();
+    _ageController.dispose();
+    super.dispose();
+  }
+
+  /// API'den yolcuları yükle
+  Future<void> _loadPassengers() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final passengers = await _adminService.getPassengers();
+      setState(() {
+        _passengers = passengers;
+        _isLoading = false;
+      });
+    } catch (e) {
+      debugPrint('❌ Error loading passengers: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
 
   // --- CRUD İŞLEMLERİ ---
 
-  void _showPassengerDialog({Map<String, dynamic>? passenger}) {
+  void _showPassengerDialog({Passenger? passenger}) {
     if (passenger != null) {
-      _firstNameController.text = passenger['firstName'];
-      _lastNameController.text = passenger['lastName'];
-      _emailController.text = passenger['email'];
-      _phoneController.text = passenger['phone'];
-      _passportController.text = passenger['passportNumber'];
-      _nationalityController.text = passenger['nationality'];
+      _firstNameController.text = passenger.firstName ?? '';
+      _lastNameController.text = passenger.lastName ?? '';
+      _emailController.text = passenger.customerEmail ?? '';
+      _phoneController.text = passenger.customerPhone ?? '';
+      _passportController.text = passenger.passportNo ?? '';
+      _nationalityController.text = passenger.nationality ?? '';
+      _ageController.text = passenger.age?.toString() ?? '';
+      _selectedGender = passenger.gender;
     } else {
       _firstNameController.clear();
       _lastNameController.clear();
@@ -58,21 +101,48 @@ class _PassengersScreenState extends State<PassengersScreen> {
       _phoneController.clear();
       _passportController.clear();
       _nationalityController.clear();
+      _ageController.clear();
+      _selectedGender = null;
+      _selectedReservationId = null;
     }
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(passenger != null ? 'Yolcu Düzenle' : 'Yeni Yolcu'),
-        content: SizedBox(
-          width: 400,
-          child: SingleChildScrollView(
-            child: Form(
-              key: _formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
+      builder: (dialogContext) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Text(passenger != null ? 'Yolcu Düzenle' : 'Yeni Yolcu'),
+          content: SizedBox(
+            width: 400,
+            child: SingleChildScrollView(
+              child: Form(
+                key: _formKey,
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                  // Yeni yolcu ekleme durumunda ReservationID dropdown göster
+                  if (passenger == null) ...[
+                    DropdownButtonFormField<int>(
+                      value: _selectedReservationId,
+                      decoration: const InputDecoration(
+                        labelText: "Rezervasyon",
+                        border: OutlineInputBorder(),
+                        prefixIcon: Icon(Icons.confirmation_number),
+                      ),
+                      items: _reservations.map((reservation) {
+                        return DropdownMenuItem<int>(
+                          value: reservation.reservationId,
+                          child: Text(
+                            '${reservation.reservationCode ?? 'Rezervasyon #${reservation.reservationId}'} - ${reservation.departureAirport ?? ''} → ${reservation.arrivalAirport ?? ''}',
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        );
+                      }).toList(),
+                      onChanged: (val) => setDialogState(() => _selectedReservationId = val),
+                      validator: (v) => v == null ? "Zorunlu" : null,
+                    ),
+                    const SizedBox(height: 16),
+                  ],
                   Row(
                     children: [
                       Expanded(
@@ -93,70 +163,238 @@ class _PassengersScreenState extends State<PassengersScreen> {
                     ],
                   ),
                   const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _emailController,
-                    decoration: const InputDecoration(labelText: "E-posta", border: OutlineInputBorder(), prefixIcon: Icon(Icons.email)),
-                    validator: (v) => v!.isEmpty ? "Zorunlu" : null,
+                  // E-posta ve Telefon alanları sadece düzenleme modunda göster (yeni ekleme için gerekli değil)
+                  if (passenger != null) ...[
+                    TextFormField(
+                      controller: _emailController,
+                      decoration: const InputDecoration(labelText: "E-posta", border: OutlineInputBorder(), prefixIcon: Icon(Icons.email)),
+                      enabled: false,
+                    ),
+                    const SizedBox(height: 16),
+                    TextFormField(
+                      controller: _phoneController,
+                      decoration: const InputDecoration(labelText: "Telefon", border: OutlineInputBorder(), prefixIcon: Icon(Icons.phone)),
+                      enabled: false,
+                    ),
+                    const SizedBox(height: 16),
+                  ],
+                  const SizedBox(height: 16),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          controller: _passportController,
+                          decoration: const InputDecoration(labelText: "Pasaport No", border: OutlineInputBorder(), prefixIcon: Icon(Icons.book)),
+                          validator: (v) => v!.isEmpty ? "Zorunlu" : null,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: TextFormField(
+                          controller: _ageController,
+                          decoration: const InputDecoration(labelText: "Yaş", border: OutlineInputBorder(), prefixIcon: Icon(Icons.cake)),
+                          keyboardType: TextInputType.number,
+                          validator: (v) {
+                            if (v!.isEmpty) return "Zorunlu";
+                            final age = int.tryParse(v);
+                            if (age == null || age < 0 || age > 150) {
+                              return "Geçerli bir yaş giriniz";
+                            }
+                            return null;
+                          },
+                        ),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _phoneController,
-                    decoration: const InputDecoration(labelText: "Telefon", border: OutlineInputBorder(), prefixIcon: Icon(Icons.phone)),
-                    validator: (v) => v!.isEmpty ? "Zorunlu" : null,
+                  Row(
+                    children: [
+                      Expanded(
+                        child: TextFormField(
+                          controller: _nationalityController,
+                          decoration: const InputDecoration(labelText: "Uyruk", border: OutlineInputBorder(), prefixIcon: Icon(Icons.flag)),
+                          validator: (v) => v!.isEmpty ? "Zorunlu" : null,
+                        ),
+                      ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: DropdownButtonFormField<String>(
+                          value: _selectedGender,
+                          decoration: const InputDecoration(labelText: "Cinsiyet", border: OutlineInputBorder(), prefixIcon: Icon(Icons.person)),
+                          items: const [
+                            DropdownMenuItem(value: 'Male', child: Text('Erkek')),
+                            DropdownMenuItem(value: 'Female', child: Text('Kadın')),
+                          ],
+                          onChanged: (val) => setDialogState(() => _selectedGender = val),
+                          validator: (v) => v == null ? "Zorunlu" : null,
+                        ),
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _passportController,
-                    decoration: const InputDecoration(labelText: "Pasaport No", border: OutlineInputBorder(), prefixIcon: Icon(Icons.book)),
-                    validator: (v) => v!.isEmpty ? "Zorunlu" : null,
-                  ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _nationalityController,
-                    decoration: const InputDecoration(labelText: "Uyruk", border: OutlineInputBorder(), prefixIcon: Icon(Icons.flag)),
-                    validator: (v) => v!.isEmpty ? "Zorunlu" : null,
-                  ),
-                ],
+                  ],
+                ),
               ),
             ),
           ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
-            onPressed: () {
-              if (_formKey.currentState!.validate()) {
-                setState(() {
+          actions: [
+            TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
+            ElevatedButton(
+              style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
+              onPressed: () async {
+                if (_formKey.currentState!.validate()) {
                   if (passenger != null) {
-                    final index = _passengers.indexWhere((p) => p['id'] == passenger['id']);
-                    _passengers[index] = {
-                      'id': passenger['id'],
-                      'firstName': _firstNameController.text,
-                      'lastName': _lastNameController.text,
-                      'email': _emailController.text,
-                      'phone': _phoneController.text,
-                      'passportNumber': _passportController.text,
-                      'nationality': _nationalityController.text,
-                    };
+                    // Güncelleme işlemi
+                    final userId = AuthService().currentUserId;
+                    if (userId == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text("Kullanıcı kimliği bulunamadı. Lütfen tekrar giriş yapın."),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                      return;
+                    }
+
+                    // Loading dialog göster
+                    if (mounted) {
+                      showDialog(
+                        context: dialogContext,
+                        barrierDismissible: false,
+                        builder: (loadingContext) => const Center(child: CircularProgressIndicator()),
+                      );
+                    }
+
+                    try {
+                      final success = await _adminService.updatePassenger(
+                        passengerId: passenger.passengerId!,
+                        firstName: _firstNameController.text.trim(),
+                        lastName: _lastNameController.text.trim(),
+                        passportNo: _passportController.text.trim(),
+                        age: _ageController.text.trim().isEmpty ? null : int.tryParse(_ageController.text.trim()),
+                        gender: _selectedGender,
+                        nationality: _nationalityController.text.trim().isEmpty ? null : _nationalityController.text.trim(),
+                        userId: userId,
+                      );
+
+                      // Loading dialog'u kapat
+                      if (mounted) Navigator.pop(dialogContext);
+
+                      if (success) {
+                        // Dialog'u kapat
+                        Navigator.pop(context);
+                        // Başarılı mesajı göster
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Yolcu bilgileri başarıyla güncellendi"),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                        // Listeyi yenile
+                        _loadPassengers();
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Yolcu güncellenirken bir hata oluştu"),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                    } catch (e) {
+                      // Loading dialog'u kapat
+                      if (mounted) Navigator.pop(dialogContext);
+                      
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text("Hata: ${e.toString()}"),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
                   } else {
-                    _passengers.insert(0, {
-                      'id': DateTime.now().millisecondsSinceEpoch,
-                      'firstName': _firstNameController.text,
-                      'lastName': _lastNameController.text,
-                      'email': _emailController.text,
-                      'phone': _phoneController.text,
-                      'passportNumber': _passportController.text,
-                      'nationality': _nationalityController.text,
-                    });
+                    // Ekleme işlemi
+                    final userId = AuthService().currentUserId;
+                    if (userId == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text("Kullanıcı kimliği bulunamadı. Lütfen tekrar giriş yapın."),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                      return;
+                    }
+
+                    if (_selectedReservationId == null) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text("Lütfen bir rezervasyon seçin."),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                      return;
+                    }
+
+                    // Loading dialog göster
+                    if (mounted) {
+                      showDialog(
+                        context: dialogContext,
+                        barrierDismissible: false,
+                        builder: (loadingContext) => const Center(child: CircularProgressIndicator()),
+                      );
+                    }
+
+                    try {
+                      final passengerId = await _adminService.addPassenger(
+                        reservationId: _selectedReservationId!,
+                        firstName: _firstNameController.text.trim(),
+                        lastName: _lastNameController.text.trim(),
+                        passportNo: _passportController.text.trim(),
+                        age: _ageController.text.trim().isEmpty ? null : int.tryParse(_ageController.text.trim()),
+                        gender: _selectedGender,
+                        nationality: _nationalityController.text.trim().isEmpty ? null : _nationalityController.text.trim(),
+                        userId: userId,
+                      );
+
+                      // Loading dialog'u kapat
+                      if (mounted) Navigator.pop(dialogContext);
+
+                      if (passengerId != null) {
+                        // Dialog'u kapat
+                        Navigator.pop(context);
+                        // Başarılı mesajı göster
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Yeni yolcu başarıyla eklendi"),
+                            backgroundColor: Colors.green,
+                          ),
+                        );
+                        // Listeyi yenile
+                        _loadPassengers();
+                      } else {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Yolcu eklenirken bir hata oluştu"),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                    } catch (e) {
+                      // Loading dialog'u kapat
+                      if (mounted) Navigator.pop(dialogContext);
+                      
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text("Hata: ${e.toString()}"),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
                   }
-                });
-                Navigator.pop(context);
-              }
-            },
-            child: Text(passenger != null ? "Güncelle" : "Ekle"),
-          ),
-        ],
+                }
+              },
+              child: Text(passenger != null ? "Güncelle" : "Ekle"),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -164,15 +402,91 @@ class _PassengersScreenState extends State<PassengersScreen> {
   void _deletePassenger(int id) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         title: const Text("Emin misiniz?"),
-        content: const Text("Bu yolcuyu silmek istediğinizden emin misiniz?"),
+        content: const Text("Bu yolcuyu silmek istediğinizden emin misiniz? Bu işlem geri alınamaz."),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
           TextButton(
-            onPressed: () {
-              setState(() => _passengers.removeWhere((p) => p['id'] == id));
-              Navigator.pop(context);
+            onPressed: () => Navigator.pop(dialogContext),
+            child: const Text("İptal"),
+          ),
+          TextButton(
+            onPressed: () async {
+              // Dialog'u kapat
+              Navigator.pop(dialogContext);
+
+              // Kullanıcı ID'sini al
+              final userId = AuthService().currentUserId;
+              if (userId == null) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Kullanıcı kimliği bulunamadı. Lütfen tekrar giriş yapın."),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+                return;
+              }
+
+              // Loading dialog göster
+              if (!mounted) return;
+              showDialog(
+                context: context,
+                barrierDismissible: false,
+                builder: (loadingDialogContext) => const Center(child: CircularProgressIndicator()),
+              );
+
+              try {
+                final success = await _adminService.deletePassenger(
+                  passengerId: id,
+                  userId: userId,
+                );
+
+                // Loading dialog'u kapat
+                if (mounted) {
+                  Navigator.of(context, rootNavigator: true).pop();
+                }
+
+                if (success) {
+                  // Başarılı mesajı göster
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("Yolcu başarıyla silindi"),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  }
+                  // Listeyi yenile
+                  if (mounted) {
+                    _loadPassengers();
+                  }
+                } else {
+                  if (mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("Yolcu silinirken bir hata oluştu"),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                }
+              } catch (e) {
+                // Loading dialog'u kapat
+                if (mounted) {
+                  Navigator.of(context, rootNavigator: true).pop();
+                }
+                
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    SnackBar(
+                      content: Text("Hata: ${e.toString()}"),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              }
             },
             child: const Text("Sil", style: TextStyle(color: Colors.red)),
           ),
@@ -183,6 +497,13 @@ class _PassengersScreenState extends State<PassengersScreen> {
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: const Color(0xFFF9FAFB),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
     final totalPages = (_passengers.length / _itemsPerPage).ceil();
     if (_currentPage >= totalPages && totalPages > 0) _currentPage = totalPages - 1;
     final startIndex = _currentPage * _itemsPerPage;
@@ -244,7 +565,7 @@ class _PassengersScreenState extends State<PassengersScreen> {
                       return _PassengerCard(
                         passenger: currentData[index],
                         onEdit: () => _showPassengerDialog(passenger: currentData[index]),
-                        onDelete: () => _deletePassenger(currentData[index]['id']),
+                        onDelete: () => _deletePassenger(currentData[index].passengerId ?? 0),
                       );
                     },
                   );
@@ -270,7 +591,7 @@ class _PassengersScreenState extends State<PassengersScreen> {
 
 // --- YOLCU KARTI ---
 class _PassengerCard extends StatelessWidget {
-  final Map<String, dynamic> passenger;
+  final Passenger passenger;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
@@ -293,28 +614,48 @@ class _PassengerCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text("${passenger['firstName']} ${passenger['lastName']}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                  Text("ID: ${passenger['id']}", style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
-                ],
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "${passenger.firstName ?? ''} ${passenger.lastName ?? ''}",
+                      style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    Text("ID: ${passenger.passengerId ?? 'N/A'}", style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+                    if (passenger.reservationCode != null)
+                      Text("Rezervasyon: ${passenger.reservationCode}", style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                  ],
+                ),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(color: Colors.teal.shade50, borderRadius: BorderRadius.circular(8)),
-                child: Text(passenger['nationality'], style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.teal.shade700)),
+                child: Text(
+                  passenger.nationality ?? 'N/A',
+                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.teal.shade700),
+                ),
               ),
             ],
           ),
 
           const Divider(height: 16),
 
-          _InfoItem(icon: Icons.email_outlined, text: passenger['email']),
-          const SizedBox(height: 4),
-          _InfoItem(icon: Icons.phone_outlined, text: passenger['phone']),
-          const SizedBox(height: 4),
-          _InfoItem(icon: Icons.book_outlined, text: passenger['passportNumber']),
+          if (passenger.customerEmail != null)
+            _InfoItem(icon: Icons.email_outlined, text: passenger.customerEmail!),
+          if (passenger.customerPhone != null) ...[
+            if (passenger.customerEmail != null) const SizedBox(height: 4),
+            _InfoItem(icon: Icons.phone_outlined, text: passenger.customerPhone!),
+          ],
+          if (passenger.passportNo != null) ...[
+            if (passenger.customerPhone != null) const SizedBox(height: 4),
+            _InfoItem(icon: Icons.book_outlined, text: passenger.passportNo!),
+          ],
+          if (passenger.age != null && passenger.gender != null) ...[
+            if (passenger.passportNo != null) const SizedBox(height: 4),
+            _InfoItem(icon: Icons.person_outline, text: "${passenger.age} yaş, ${passenger.gender == 'Male' ? 'Erkek' : 'Kadın'}"),
+          ],
 
           const SizedBox(height: 8),
 

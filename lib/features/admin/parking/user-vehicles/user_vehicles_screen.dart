@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
+import '../../../../core/services/admin_service.dart';
+import '../../../../core/services/auth_service.dart';
 
 class UserVehiclesScreen extends StatefulWidget {
   const UserVehiclesScreen({super.key});
@@ -10,6 +12,10 @@ class UserVehiclesScreen extends StatefulWidget {
 
 class _UserVehiclesScreenState extends State<UserVehiclesScreen> {
   // --- STATE ---
+  final AdminService _adminService = AdminService();
+  bool _isLoading = true;
+  List<UserVehicle> _vehicles = [];
+  List<VehicleType> _vehicleTypesList = [];
   int _currentPage = 0;
   final int _itemsPerPage = 10;
   String _searchTerm = "";
@@ -21,56 +27,98 @@ class _UserVehiclesScreenState extends State<UserVehiclesScreen> {
   int? _selectedTypeId;
   final TextEditingController _plateController = TextEditingController();
 
-  // Sabit Listeler
-  final List<Map<String, dynamic>> _users = [
-    {'id': 1, 'name': 'Ahmet Yılmaz', 'email': 'ahmet.yilmaz@email.com'},
-    {'id': 2, 'name': 'Mehmet Kaya', 'email': 'mehmet.kaya@email.com'},
-    {'id': 3, 'name': 'Ayşe Demir', 'email': 'ayse.demir@email.com'},
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
 
-  final List<Map<String, dynamic>> _vehicleTypes = [
-    {'id': 1, 'name': 'Otomobil'},
-    {'id': 2, 'name': 'SUV'},
-    {'id': 3, 'name': 'Minibüs'},
-    {'id': 4, 'name': 'Motosiklet'},
-    {'id': 5, 'name': 'Kamyonet'},
-  ];
+  /// Tüm verileri yükle (araçlar + araç tipleri)
+  Future<void> _loadData() async {
+    setState(() {
+      _isLoading = true;
+    });
 
-  // --- MOCK VERİLER (React'ten alındı) ---
-  List<Map<String, dynamic>> _vehicles = [
-    {'vehicleID': 1, 'userID': 1, 'userName': 'Ahmet Yılmaz', 'userEmail': 'ahmet.yilmaz@email.com', 'typeID': 1, 'typeName': 'Otomobil', 'plateNumber': '34 ABC 123'},
-    {'vehicleID': 2, 'userID': 2, 'userName': 'Mehmet Kaya', 'userEmail': 'mehmet.kaya@email.com', 'typeID': 2, 'typeName': 'SUV', 'plateNumber': '06 XYZ 456'},
-    {'vehicleID': 3, 'userID': 1, 'userName': 'Ahmet Yılmaz', 'userEmail': 'ahmet.yilmaz@email.com', 'typeID': 4, 'typeName': 'Motosiklet', 'plateNumber': '34 MN 789'},
-    {'vehicleID': 4, 'userID': 3, 'userName': 'Ayşe Demir', 'userEmail': 'ayse.demir@email.com', 'typeID': 3, 'typeName': 'Minibüs', 'plateNumber': '35 DEF 321'},
-    // Sayfalama için veri üretelim
-    ...List.generate(15, (index) => {
-      'vehicleID': 5 + index,
-      'userID': (index % 3) + 1,
-      'userName': 'User ${index + 1}',
-      'userEmail': 'user${index + 1}@email.com',
-      'typeID': (index % 5) + 1,
-      'typeName': 'Type ${index + 1}',
-      'plateNumber': '34 TES ${100 + index}'
-    }),
-  ];
+    try {
+      final results = await Future.wait([
+        _adminService.getUserVehicles(),
+        _adminService.getVehicleTypes(),
+      ]);
+
+      setState(() {
+        _vehicles = results[0] as List<UserVehicle>;
+        _vehicleTypesList = results[1] as List<VehicleType>;
+        _isLoading = false;
+      });
+    } catch (e) {
+      debugPrint('❌ Error loading data: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  /// API'den kullanıcı araçlarını yükle (sadece araçlar için - liste yenileme)
+  Future<void> _loadUserVehicles() async {
+    try {
+      final vehicles = await _adminService.getUserVehicles();
+      setState(() {
+        _vehicles = vehicles;
+      });
+    } catch (e) {
+      debugPrint('❌ Error loading user vehicles: $e');
+    }
+  }
+
+  // Araç tiplerini unique olarak al (filtreleme için - isimlerden)
+  List<String> get _vehicleTypes {
+    final typeSet = <String>{};
+    for (var vehicle in _vehicles) {
+      if (vehicle.typeName != null && vehicle.typeName!.isNotEmpty) {
+        typeSet.add(vehicle.typeName!);
+      }
+    }
+    return typeSet.toList()..sort();
+  }
+
+  // Kullanıcıları unique olarak al (modal dropdown için)
+  List<Map<String, dynamic>> get _users {
+    final userMap = <int, Map<String, dynamic>>{};
+    for (var vehicle in _vehicles) {
+      if (vehicle.userId != null && vehicle.userName != null) {
+        if (!userMap.containsKey(vehicle.userId)) {
+          userMap[vehicle.userId!] = {
+            'id': vehicle.userId!,
+            'name': vehicle.userName!,
+            'email': vehicle.userEmail ?? '',
+          };
+        }
+      }
+    }
+    return userMap.values.toList()..sort((a, b) => (a['name'] as String).compareTo(b['name'] as String));
+  }
 
   // --- FİLTRELEME ---
-  List<Map<String, dynamic>> get _filteredVehicles {
+  List<UserVehicle> get _filteredVehicles {
     return _vehicles.where((v) {
-      final matchesSearch = v['userName'].toString().toLowerCase().contains(_searchTerm.toLowerCase()) ||
-          v['plateNumber'].toString().toLowerCase().contains(_searchTerm.toLowerCase());
-      final matchesType = _filterType.isEmpty || v['typeName'] == _filterType;
+      final matchesSearch = (v.userName?.toLowerCase().contains(_searchTerm.toLowerCase()) ?? false) ||
+          (v.plateNumber?.toLowerCase().contains(_searchTerm.toLowerCase()) ?? false);
+      final matchesType = _filterType.isEmpty || v.typeName == _filterType;
       return matchesSearch && matchesType;
     }).toList();
   }
 
   // --- CRUD İŞLEMLERİ ---
 
-  void _showVehicleDialog({Map<String, dynamic>? vehicle}) {
-    if (vehicle != null) {
-      _selectedUserId = vehicle['userID'];
-      _selectedTypeId = vehicle['typeID'];
-      _plateController.text = vehicle['plateNumber'];
+  void _showVehicleDialog({UserVehicle? vehicle}) {
+    final bool isEditing = vehicle != null;
+
+    if (isEditing) {
+      // isEditing true ise vehicle null değil
+      final userVehicle = vehicle;
+      _selectedUserId = userVehicle.userId;
+      _selectedTypeId = userVehicle.typeId;
+      _plateController.text = userVehicle.plateNumber ?? '';
     } else {
       _selectedUserId = null;
       _selectedTypeId = null;
@@ -79,109 +127,405 @@ class _UserVehiclesScreenState extends State<UserVehiclesScreen> {
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(vehicle != null ? 'Araç Düzenle' : 'Yeni Araç'),
-        content: SizedBox(
-          width: 400,
-          child: SingleChildScrollView(
-            child: Form(
-              key: _formKey,
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  DropdownButtonFormField<int>(
-                    value: _selectedUserId,
-                    decoration: const InputDecoration(labelText: "Kullanıcı", border: OutlineInputBorder()),
-                    items: _users.map((u) => DropdownMenuItem(value: u['id'] as int, child: Text("${u['name']} (${u['email']})", overflow: TextOverflow.ellipsis))).toList(),
-                    onChanged: (val) => setState(() => _selectedUserId = val),
-                    validator: (v) => v == null ? "Seçiniz" : null,
-                    isExpanded: true,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setModalState) {
+          return AlertDialog(
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+            title: Text(isEditing ? 'Araç Düzenle' : 'Yeni Araç'),
+            content: SizedBox(
+              width: 500,
+              child: SingleChildScrollView(
+                child: Form(
+                  key: _formKey,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      // Kullanıcı dropdown
+                      DropdownButtonFormField<int>(
+                        value: _selectedUserId,
+                        decoration: const InputDecoration(
+                          labelText: "Kullanıcı",
+                          border: OutlineInputBorder(),
+                        ),
+                        items: _users.map((u) {
+                          return DropdownMenuItem<int>(
+                            value: u['id'] as int,
+                            child: Text(
+                              "${u['name']} (${u['email']})",
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: (val) {
+                          setModalState(() {
+                            _selectedUserId = val;
+                          });
+                        },
+                        validator: (v) => v == null ? "Kullanıcı seçiniz" : null,
+                        isExpanded: true,
+                      ),
+                      const SizedBox(height: 16),
+                      // Araç tipi dropdown
+                      DropdownButtonFormField<int>(
+                        value: _selectedTypeId,
+                        decoration: const InputDecoration(
+                          labelText: "Araç Tipi",
+                          border: OutlineInputBorder(),
+                        ),
+                        items: _vehicleTypesList.map((vt) {
+                          return DropdownMenuItem<int>(
+                            value: vt.typeId,
+                            child: Text(
+                              vt.typeName ?? '',
+                              overflow: TextOverflow.ellipsis,
+                              maxLines: 1,
+                            ),
+                          );
+                        }).toList(),
+                        onChanged: (val) {
+                          setModalState(() {
+                            _selectedTypeId = val;
+                          });
+                        },
+                        validator: (v) => v == null ? "Araç tipi seçiniz" : null,
+                        isExpanded: true,
+                      ),
+                      const SizedBox(height: 16),
+                      // Plaka numarası
+                      TextFormField(
+                        controller: _plateController,
+                        decoration: const InputDecoration(
+                          labelText: "Plaka",
+                          border: OutlineInputBorder(),
+                          hintText: "Örn: 34 ABC 123",
+                        ),
+                        validator: (v) => v!.trim().isEmpty ? "Plaka numarası zorunludur" : null,
+                      ),
+                    ],
                   ),
-                  const SizedBox(height: 16),
-                  DropdownButtonFormField<int>(
-                    value: _selectedTypeId,
-                    decoration: const InputDecoration(labelText: "Araç Tipi", border: OutlineInputBorder()),
-                    items: _vehicleTypes.map((t) => DropdownMenuItem(value: t['id'] as int, child: Text(t['name']))).toList(),
-                    onChanged: (val) => setState(() => _selectedTypeId = val),
-                    validator: (v) => v == null ? "Seçiniz" : null,
-                  ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _plateController,
-                    decoration: const InputDecoration(labelText: "Plaka", border: OutlineInputBorder(), hintText: "Örn: 34 ABC 123"),
-                    validator: (v) => v!.isEmpty ? "Zorunlu alan" : null,
-                  ),
-                ],
+                ),
               ),
             ),
-          ),
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
-            onPressed: () {
-              if (_formKey.currentState!.validate()) {
-                setState(() {
-                  final user = _users.firstWhere((u) => u['id'] == _selectedUserId);
-                  final type = _vehicleTypes.firstWhere((t) => t['id'] == _selectedTypeId);
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text("İptal", style: TextStyle(color: Colors.grey)),
+              ),
+              if (isEditing)
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
+                  onPressed: () async {
+                    if (_formKey.currentState!.validate()) {
+                      final userId = AuthService().currentUserId;
+                      if (userId == null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Kullanıcı kimliği bulunamadı. Lütfen tekrar giriş yapın."),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
 
-                  if (vehicle != null) {
-                    final index = _vehicles.indexWhere((v) => v['vehicleID'] == vehicle['vehicleID']);
-                    _vehicles[index] = {
-                      'vehicleID': vehicle['vehicleID'],
-                      'userID': _selectedUserId,
-                      'userName': user['name'],
-                      'userEmail': user['email'],
-                      'typeID': _selectedTypeId,
-                      'typeName': type['name'],
-                      'plateNumber': _plateController.text,
-                    };
-                  } else {
-                    _vehicles.insert(0, {
-                      'vehicleID': DateTime.now().millisecondsSinceEpoch,
-                      'userID': _selectedUserId,
-                      'userName': user['name'],
-                      'userEmail': user['email'],
-                      'typeID': _selectedTypeId,
-                      'typeName': type['name'],
-                      'plateNumber': _plateController.text,
-                    });
-                  }
-                });
-                Navigator.pop(context);
-              }
-            },
-            child: Text(vehicle != null ? "Güncelle" : "Ekle"),
-          ),
-        ],
+                      if (_selectedUserId == null || _selectedTypeId == null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Kullanıcı ve araç tipi seçilmelidir"),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+
+                      if (_plateController.text.trim().isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Plaka numarası boş olamaz"),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+
+                      // Loading dialog göster
+                      if (mounted) {
+                        showDialog(
+                          context: context,
+                          barrierDismissible: false,
+                          builder: (loadingContext) => const Center(child: CircularProgressIndicator()),
+                        );
+                      }
+
+                      try {
+                        final userVehicle = vehicle; // isEditing true ise vehicle null değil
+                        if (userVehicle.vehicleId == null) {
+                          if (mounted) {
+                            Navigator.of(context, rootNavigator: true).pop();
+                          }
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text("Araç ID bulunamadı"),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                          return;
+                        }
+                        final success = await _adminService.updateUserVehicle(
+                          vehicleId: userVehicle.vehicleId!,
+                          userId: _selectedUserId!,
+                          typeId: _selectedTypeId!,
+                          plateNumber: _plateController.text.trim(),
+                          logUserId: userId,
+                        );
+
+                        // Loading dialog'u kapat
+                        if (mounted) {
+                          Navigator.of(context, rootNavigator: true).pop();
+                        }
+
+                        if (success) {
+                          // Modal'ı kapat
+                          Navigator.pop(context);
+                          
+                          // Başarılı mesajı göster
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text("Araç başarıyla güncellendi"),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                          
+                          // Listeyi yenile
+                          _loadUserVehicles();
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text("Araç güncellenirken bir hata oluştu"),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        // Loading dialog'u kapat
+                        if (mounted) {
+                          Navigator.of(context, rootNavigator: true).pop();
+                        }
+                        
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text("Hata: ${e.toString()}"),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                    }
+                  },
+                  child: const Text("Güncelle"),
+                )
+              else
+                ElevatedButton(
+                  style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
+                  onPressed: () async {
+                    if (_formKey.currentState!.validate()) {
+                      final userId = AuthService().currentUserId;
+                      if (userId == null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Kullanıcı kimliği bulunamadı. Lütfen tekrar giriş yapın."),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+
+                      if (_selectedUserId == null || _selectedTypeId == null) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Kullanıcı ve araç tipi seçilmelidir"),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+
+                      if (_plateController.text.trim().isEmpty) {
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          const SnackBar(
+                            content: Text("Plaka numarası boş olamaz"),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                        return;
+                      }
+
+                      // Loading dialog göster
+                      if (mounted) {
+                        showDialog(
+                          context: context,
+                          barrierDismissible: false,
+                          builder: (loadingContext) => const Center(child: CircularProgressIndicator()),
+                        );
+                      }
+
+                      try {
+                        final result = await _adminService.addUserVehicle(
+                          userId: _selectedUserId!,
+                          typeId: _selectedTypeId!,
+                          plateNumber: _plateController.text.trim(),
+                          logUserId: userId,
+                        );
+
+                        // Loading dialog'u kapat
+                        if (mounted) {
+                          Navigator.of(context, rootNavigator: true).pop();
+                        }
+
+                        if (result['success'] == true) {
+                          // Modal'ı kapat
+                          Navigator.pop(context);
+                          
+                          // Başarılı mesajı göster
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                              content: Text("Araç başarıyla eklendi"),
+                              backgroundColor: Colors.green,
+                            ),
+                          );
+                          
+                          // Listeyi yenile
+                          _loadUserVehicles();
+                        } else {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Text(result['message'] ?? "Araç eklenirken bir hata oluştu"),
+                              backgroundColor: Colors.red,
+                            ),
+                          );
+                        }
+                      } catch (e) {
+                        // Loading dialog'u kapat
+                        if (mounted) {
+                          Navigator.of(context, rootNavigator: true).pop();
+                        }
+                        
+                        ScaffoldMessenger.of(context).showSnackBar(
+                          SnackBar(
+                            content: Text("Hata: ${e.toString()}"),
+                            backgroundColor: Colors.red,
+                          ),
+                        );
+                      }
+                    }
+                  },
+                  child: const Text("Ekle"),
+                ),
+            ],
+          );
+        },
       ),
     );
   }
 
-  void _deleteVehicle(int id) {
-    showDialog(
+  void _deleteVehicle(int id) async {
+    final userId = AuthService().currentUserId;
+    if (userId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("Kullanıcı kimliği bulunamadı. Lütfen tekrar giriş yapın."),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // Onay modalı göster
+    final shouldDelete = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text("Emin misiniz?"),
-        content: const Text("Bu aracı silmek istediğinizden emin misiniz?"),
+        content: const Text(
+          "Bu aracı silmek istediğinizden emin misiniz?",
+        ),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
           TextButton(
-            onPressed: () {
-              setState(() => _vehicles.removeWhere((v) => v['vehicleID'] == id));
-              Navigator.pop(context);
-            },
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("İptal"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
             child: const Text("Sil", style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
     );
+
+    if (shouldDelete != true) {
+      return; // Kullanıcı iptal etti
+    }
+
+    // Loading dialog göster
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (loadingContext) => const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    try {
+      final success = await _adminService.deleteUserVehicle(
+        vehicleId: id,
+        logUserId: userId,
+      );
+
+      // Loading dialog'u kapat
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+
+      if (success) {
+        // Başarılı mesajı göster
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Araç başarıyla silindi"),
+            backgroundColor: Colors.green,
+          ),
+        );
+        // Listeyi yenile
+        _loadUserVehicles();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Araç silinirken bir hata oluştu"),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    } catch (e) {
+      // Loading dialog'u kapat
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Hata: ${e.toString()}"),
+          backgroundColor: Colors.red,
+        ),
+      );
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: const Color(0xFFF9FAFB),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
     final filtered = _filteredVehicles;
     final totalPages = (filtered.length / _itemsPerPage).ceil();
     if (_currentPage >= totalPages && totalPages > 0) _currentPage = totalPages - 1;
@@ -252,7 +596,7 @@ class _UserVehiclesScreenState extends State<UserVehiclesScreen> {
                           decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12), hintText: "Tüm Araç Tipleri"),
                           items: [
                             const DropdownMenuItem(value: "", child: Text("Tüm Araç Tipleri")),
-                            ..._vehicleTypes.map((t) => DropdownMenuItem(value: t['name'] as String, child: Text(t['name'] as String))),
+                            ..._vehicleTypes.map((t) => DropdownMenuItem(value: t, child: Text(t))),
                           ],
                           onChanged: (val) => setState(() => _filterType = val ?? ""),
                         ),
@@ -286,7 +630,7 @@ class _UserVehiclesScreenState extends State<UserVehiclesScreen> {
                       return _UserVehicleCard(
                         vehicle: currentData[index],
                         onEdit: () => _showVehicleDialog(vehicle: currentData[index]),
-                        onDelete: () => _deleteVehicle(currentData[index]['vehicleID']),
+                        onDelete: () => _deleteVehicle(currentData[index].vehicleId ?? 0),
                       );
                     },
                   );
@@ -312,7 +656,7 @@ class _UserVehiclesScreenState extends State<UserVehiclesScreen> {
 
 // --- KULLANICI ARACI KARTI ---
 class _UserVehicleCard extends StatelessWidget {
-  final Map<String, dynamic> vehicle;
+  final UserVehicle vehicle;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
@@ -339,15 +683,15 @@ class _UserVehicleCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(vehicle['userName'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), overflow: TextOverflow.ellipsis),
-                    Text(vehicle['userEmail'], style: TextStyle(fontSize: 12, color: Colors.grey.shade600), overflow: TextOverflow.ellipsis),
+                    Text(vehicle.userName ?? '', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), overflow: TextOverflow.ellipsis),
+                    Text(vehicle.userEmail ?? '', style: TextStyle(fontSize: 12, color: Colors.grey.shade600), overflow: TextOverflow.ellipsis),
                   ],
                 ),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(color: Colors.teal.shade50, borderRadius: BorderRadius.circular(8)),
-                child: Text(vehicle['typeName'], style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.teal.shade700)),
+                child: Text(vehicle.typeName ?? '', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.teal.shade700)),
               ),
             ],
           ),
@@ -361,7 +705,7 @@ class _UserVehicleCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(4)),
-                child: Text(vehicle['plateNumber'], style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.black87)),
+                child: Text(vehicle.plateNumber ?? '', style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.black87)),
               ),
             ],
           ),

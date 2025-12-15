@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
+import '../../../core/services/admin_service.dart';
+import '../../../core/services/auth_service.dart';
 
 class EmployeesScreen extends StatefulWidget {
   const EmployeesScreen({super.key});
@@ -10,6 +12,11 @@ class EmployeesScreen extends StatefulWidget {
 
 class _EmployeesScreenState extends State<EmployeesScreen> {
   // --- STATE ---
+  final AdminService _adminService = AdminService();
+  bool _isLoading = true;
+  List<Employee> _employees = [];
+  List<Department> _departments = [];
+  int? _selectedDepartmentId; // Seçilen departman ID'si
   int _currentPage = 0;
   final int _itemsPerPage = 10;
 
@@ -23,8 +30,49 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
   // Email ve Tarih silindi, Maaş eklendi:
   final TextEditingController _salaryController = TextEditingController();
 
-  // --- MOCK VERİLER ---
-  List<Map<String, dynamic>> _employees = [
+  @override
+  void initState() {
+    super.initState();
+    _loadEmployees();
+    _loadDepartments();
+  }
+
+  /// API'den departman listesini yükle
+  Future<void> _loadDepartments() async {
+    try {
+      final departments = await _adminService.getDepartments();
+      setState(() {
+        _departments = departments;
+      });
+    } catch (e) {
+      debugPrint('❌ Error loading departments: $e');
+    }
+  }
+
+  /// API'den çalışan listesini yükle
+  Future<void> _loadEmployees() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final employees = await _adminService.getEmployees();
+      debugPrint('📥 Employees loaded: ${employees.length} items');
+      
+      setState(() {
+        _employees = employees;
+        _isLoading = false;
+      });
+    } catch (e) {
+      debugPrint('❌ Error loading employees: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  // --- MOCK VERİLER (KALDIRILDI) ---
+  /* List<Map<String, dynamic>> _employees = [
     {
       'id': 1, 
       'firstName': 'Ahmet', 
@@ -80,32 +128,33 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
       'position': 'Uzman',
       'salary': 25000 + (index * 500) // Dinamik maaş
     }),
-  ];
+  ]; */
 
   // --- CRUD İŞLEMLERİ ---
 
-  void _showEmployeeDialog({Map<String, dynamic>? employee}) {
+  void _showEmployeeDialog({Employee? employee}) {
     if (employee != null) {
-      _firstNameController.text = employee['firstName'];
-      _lastNameController.text = employee['lastName'];
-      // Email ve Tarih setleme kaldırıldı
-      _phoneController.text = employee['phone'];
-      _deptController.text = employee['department'];
-      _posController.text = employee['position'];
-      _salaryController.text = employee['salary'].toString(); // Maaş setlendi
+      _firstNameController.text = employee.firstName ?? '';
+      _lastNameController.text = employee.lastName ?? '';
+      _phoneController.text = employee.contact ?? '';
+      _deptController.text = employee.departmentName ?? '';
+      _posController.text = employee.role ?? '';
+      _salaryController.text = employee.salary?.toString() ?? '';
+      _selectedDepartmentId = employee.departmentId;
     } else {
       _firstNameController.clear();
       _lastNameController.clear();
-      // Email ve Tarih clear kaldırıldı
       _phoneController.clear();
       _deptController.clear();
       _posController.clear();
-      _salaryController.clear(); // Maaş temizlendi
+      _salaryController.clear();
+      _selectedDepartmentId = null;
     }
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(employee != null ? 'Çalışan Düzenle' : 'Yeni Çalışan'),
         content: SizedBox(
@@ -143,10 +192,29 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
                     validator: (v) => v!.isEmpty ? "Zorunlu" : null,
                   ),
                   const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _deptController,
-                    decoration: const InputDecoration(labelText: "Departman", border: OutlineInputBorder(), prefixIcon: Icon(Icons.business)),
-                    validator: (v) => v!.isEmpty ? "Zorunlu" : null,
+                  DropdownButtonFormField<int>(
+                    value: employee != null ? employee.departmentId : _selectedDepartmentId,
+                    decoration: const InputDecoration(
+                      labelText: "Departman",
+                      border: OutlineInputBorder(),
+                      prefixIcon: Icon(Icons.business),
+                    ),
+                    items: _departments.map((dept) {
+                      return DropdownMenuItem<int>(
+                        value: dept.departmentId,
+                        child: Text(dept.departmentName ?? 'İsimsiz Departman'),
+                      );
+                    }).toList(),
+                    onChanged: (value) {
+                      setDialogState(() {
+                        _selectedDepartmentId = value;
+                        if (value != null) {
+                          final dept = _departments.firstWhere((d) => d.departmentId == value);
+                          _deptController.text = dept.departmentName ?? '';
+                        }
+                      });
+                    },
+                    validator: (v) => v == null ? "Zorunlu" : null,
                   ),
                   const SizedBox(height: 16),
                   TextFormField(
@@ -182,40 +250,133 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
           TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
-            onPressed: () {
+            onPressed: () async {
               if (_formKey.currentState!.validate()) {
-                setState(() {
-                  if (employee != null) {
-                    final index = _employees.indexWhere((e) => e['id'] == employee['id']);
-                    _employees[index] = {
-                      'id': employee['id'],
-                      'firstName': _firstNameController.text,
-                      'lastName': _lastNameController.text,
-                      // Email ve Tarih kaydetme kaldırıldı
-                      'phone': _phoneController.text,
-                      'department': _deptController.text,
-                      'position': _posController.text,
-                      'salary': int.parse(_salaryController.text), // Maaş integer olarak kaydediliyor
-                    };
-                  } else {
-                    _employees.insert(0, {
-                      'id': DateTime.now().millisecondsSinceEpoch,
-                      'firstName': _firstNameController.text,
-                      'lastName': _lastNameController.text,
-                      // Email ve Tarih kaydetme kaldırıldı
-                      'phone': _phoneController.text,
-                      'department': _deptController.text,
-                      'position': _posController.text,
-                      'salary': int.parse(_salaryController.text), // Maaş kaydediliyor
-                    });
+                if (employee != null) {
+                  // Güncelleme işlemi
+                  final userId = AuthService().currentUserId;
+                  if (userId == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Kullanıcı bilgisi bulunamadı')),
+                    );
+                    return;
                   }
-                });
-                Navigator.pop(context);
+
+                  // DepartmentID'yi almak için mevcut employee'dan alıyoruz
+                  // Eğer form'da DepartmentID seçimi varsa onu kullanabiliriz
+                  final departmentId = employee.departmentId;
+                  if (departmentId == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Departman bilgisi bulunamadı')),
+                    );
+                    return;
+                  }
+
+                  final salary = double.tryParse(_salaryController.text);
+                  if (salary == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Geçerli bir maaş giriniz')),
+                    );
+                    return;
+                  }
+
+                  final success = await _adminService.updateEmployee(
+                    employeeId: employee.employeeId!,
+                    firstName: _firstNameController.text,
+                    lastName: _lastNameController.text,
+                    departmentId: departmentId,
+                    salary: salary,
+                    contact: _phoneController.text,
+                    role: _posController.text,
+                    userId: userId,
+                  );
+
+                  if (success) {
+                    if (mounted) {
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Çalışan başarıyla güncellendi'),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
+                      _loadEmployees(); // Listeyi yenile
+                    }
+                  } else {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Çalışan güncellenirken hata oluştu. Lütfen terminal loglarını kontrol edin.'),
+                          backgroundColor: Colors.red,
+                          duration: Duration(seconds: 5),
+                        ),
+                      );
+                    }
+                  }
+                } else {
+                  // Yeni çalışan ekleme işlemi
+                  final userId = AuthService().currentUserId;
+                  if (userId == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Kullanıcı bilgisi bulunamadı')),
+                    );
+                    return;
+                  }
+
+                  if (_selectedDepartmentId == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Lütfen bir departman seçiniz')),
+                    );
+                    return;
+                  }
+
+                  final salary = double.tryParse(_salaryController.text);
+                  if (salary == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Geçerli bir maaş giriniz')),
+                    );
+                    return;
+                  }
+
+                  final success = await _adminService.addEmployee(
+                    firstName: _firstNameController.text,
+                    lastName: _lastNameController.text,
+                    departmentId: _selectedDepartmentId!,
+                    salary: salary,
+                    contact: _phoneController.text,
+                    role: _posController.text,
+                    userId: userId,
+                  );
+
+                  if (success) {
+                    if (mounted) {
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Çalışan başarıyla eklendi'),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
+                      _loadEmployees(); // Listeyi yenile
+                    }
+                  } else {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Çalışan eklenirken hata oluştu. Lütfen terminal loglarını kontrol edin.'),
+                          backgroundColor: Colors.red,
+                          duration: Duration(seconds: 5),
+                        ),
+                      );
+                    }
+                  }
+                }
               }
             },
             child: Text(employee != null ? "Güncelle" : "Ekle"),
           ),
         ],
+        ),
       ),
     );
   }
@@ -229,9 +390,48 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
           TextButton(
-            onPressed: () {
-              setState(() => _employees.removeWhere((e) => e['id'] == id));
+            onPressed: () async {
               Navigator.pop(context);
+              
+              if (!mounted) return;
+              
+              final userId = AuthService().currentUserId;
+              if (userId == null) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Kullanıcı bilgisi bulunamadı'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+                return;
+              }
+
+              final success = await _adminService.deleteEmployee(
+                employeeId: id,
+                userId: userId,
+              );
+
+              if (!mounted) return;
+
+              if (success) {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Çalışan başarıyla silindi'),
+                    backgroundColor: Colors.green,
+                  ),
+                );
+                _loadEmployees(); // Listeyi yenile
+              } else {
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Çalışan silinirken hata oluştu. Bu çalışan bir departmanın yöneticisi olabilir. Lütfen önce departman yöneticisini değiştirin.'),
+                    backgroundColor: Colors.red,
+                    duration: Duration(seconds: 5),
+                  ),
+                );
+              }
             },
             child: const Text("Sil", style: TextStyle(color: Colors.red)),
           ),
@@ -283,32 +483,37 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
             const SizedBox(height: 24),
 
             // --- KART LİSTESİ ---
-            if (currentData.isEmpty)
-              const Center(child: Padding(padding: EdgeInsets.all(40), child: Text("Çalışan bulunamadı.")))
-            else
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  int crossAxisCount = constraints.maxWidth > 1100 ? 3 : (constraints.maxWidth > 700 ? 2 : 1);
-                  return GridView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: crossAxisCount,
-                      crossAxisSpacing: 16,
-                      mainAxisSpacing: 16,
-                      childAspectRatio: 1.8, // Kart boyutu biraz genişletildi
-                    ),
-                    itemCount: currentData.length,
-                    itemBuilder: (context, index) {
-                      return _EmployeeCard(
-                        employee: currentData[index],
-                        onEdit: () => _showEmployeeDialog(employee: currentData[index]),
-                        onDelete: () => _deleteEmployee(currentData[index]['id']),
-                      );
-                    },
-                  );
-                },
-              ),
+            _isLoading
+                ? const Center(
+                    child: Padding(
+                        padding: EdgeInsets.all(40),
+                        child: CircularProgressIndicator()))
+                : currentData.isEmpty
+                    ? const Center(child: Padding(padding: EdgeInsets.all(40), child: Text("Çalışan bulunamadı.")))
+                    : LayoutBuilder(
+                        builder: (context, constraints) {
+                          int crossAxisCount = constraints.maxWidth > 1100 ? 3 : (constraints.maxWidth > 700 ? 2 : 1);
+                          return GridView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: crossAxisCount,
+                              crossAxisSpacing: 16,
+                              mainAxisSpacing: 16,
+                              childAspectRatio: 1.8, // Kart boyutu biraz genişletildi
+                            ),
+                            itemCount: currentData.length,
+                            itemBuilder: (context, index) {
+                              return _EmployeeCard(
+                                key: ValueKey(currentData[index].employeeId ?? index),
+                                employee: currentData[index],
+                                onEdit: () => _showEmployeeDialog(employee: currentData[index]),
+                                onDelete: () => _deleteEmployee(currentData[index].employeeId ?? 0),
+                              );
+                            },
+                          );
+                        },
+                      ),
 
             // --- SAYFALAMA ---
             const SizedBox(height: 20),
@@ -329,11 +534,11 @@ class _EmployeesScreenState extends State<EmployeesScreen> {
 
 // --- ÇALIŞAN KARTI ---
 class _EmployeeCard extends StatelessWidget {
-  final Map<String, dynamic> employee;
+  final Employee employee;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
-  const _EmployeeCard({required this.employee, required this.onEdit, required this.onDelete});
+  const _EmployeeCard({Key? key, required this.employee, required this.onEdit, required this.onDelete}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -355,27 +560,30 @@ class _EmployeeCard extends StatelessWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Text("${employee['firstName']} ${employee['lastName']}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
-                  Text("ID: ${employee['id']}", style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
+                  Text("${employee.firstName ?? ''} ${employee.lastName ?? ''}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16)),
+                  Text("ID: ${employee.employeeId ?? 'N/A'}", style: TextStyle(fontSize: 12, color: Colors.grey.shade500)),
                 ],
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(color: Colors.teal.shade50, borderRadius: BorderRadius.circular(8)),
-                child: Text(employee['position'], style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.teal.shade700)),
+                child: Text(employee.role ?? 'N/A', style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.teal.shade700)),
               ),
             ],
           ),
 
           const Divider(height: 16),
 
-          _InfoItem(icon: Icons.business, text: employee['department']),
-          const SizedBox(height: 4),
-          // Email Kaldırıldı
-          _InfoItem(icon: Icons.phone_outlined, text: employee['phone']),
-          const SizedBox(height: 4),
-          // Giriş Tarihi Kaldırıldı, yerine Maaş Eklendi
-          _InfoItem(icon: Icons.monetization_on, text: "Maaş: ${employee['salary']} ₺"),
+          if (employee.departmentName != null && employee.departmentName!.isNotEmpty)
+            _InfoItem(icon: Icons.business, text: employee.departmentName!),
+          if (employee.departmentName != null && employee.departmentName!.isNotEmpty)
+            const SizedBox(height: 4),
+          if (employee.contact != null && employee.contact!.isNotEmpty)
+            _InfoItem(icon: Icons.phone_outlined, text: employee.contact!),
+          if (employee.contact != null && employee.contact!.isNotEmpty)
+            const SizedBox(height: 4),
+          if (employee.salary != null)
+            _InfoItem(icon: Icons.monetization_on, text: "Maaş: ${employee.salary!.toStringAsFixed(2)} ₺"),
 
           const SizedBox(height: 8),
 

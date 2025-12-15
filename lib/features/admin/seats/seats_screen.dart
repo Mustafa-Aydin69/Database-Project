@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
+import '../../../core/services/admin_service.dart';
+import '../../../core/services/auth_service.dart';
 
 class SeatsScreen extends StatefulWidget {
   const SeatsScreen({super.key});
@@ -15,6 +17,8 @@ class _SeatsScreenState extends State<SeatsScreen> {
       12; // Koltuklar küçük olduğu için sayfada daha çok gösterebiliriz
   String _searchTerm = "";
   String _filterAircraft = "";
+  bool _isLoading = true;
+  final AdminService _adminService = AdminService();
 
   // --- FORM KONTROLCÜLERİ ---
   final _formKey = GlobalKey<FormState>(); // Tekli Ekleme Formu
@@ -38,89 +42,64 @@ class _SeatsScreenState extends State<SeatsScreen> {
     text: "A,B,C,D,E,F",
   );
 
-  // Sabit Listeler
-  final List<String> _aircraftOptions = [
-    'Boeing 737-800',
-    'Airbus A320',
-    'Boeing 777-300ER',
-    'Airbus A350',
-  ];
-  final List<String> _classOptions = ['Economy', 'Business', 'First Class'];
+  // --- VERİLER ---
+  List<Seat> _seats = [];
 
-  // --- MOCK VERİLER (React'ten alındı) ---
-  List<Map<String, dynamic>> _seats = [
-    {
-      'seatID': 1,
-      'aircraftModel': 'Boeing 737-800',
-      'seatNumber': '1A',
-      'className': 'Business',
-    },
-    {
-      'seatID': 2,
-      'aircraftModel': 'Boeing 737-800',
-      'seatNumber': '1B',
-      'className': 'Business',
-    },
-    {
-      'seatID': 3,
-      'aircraftModel': 'Boeing 737-800',
-      'seatNumber': '2A',
-      'className': 'Business',
-    },
-    {
-      'seatID': 4,
-      'aircraftModel': 'Boeing 737-800',
-      'seatNumber': '10A',
-      'className': 'Economy',
-    },
-    {
-      'seatID': 5,
-      'aircraftModel': 'Boeing 737-800',
-      'seatNumber': '10B',
-      'className': 'Economy',
-    },
-    {
-      'seatID': 6,
-      'aircraftModel': 'Airbus A320',
-      'seatNumber': '1A',
-      'className': 'Business',
-    },
-    {
-      'seatID': 7,
-      'aircraftModel': 'Airbus A320',
-      'seatNumber': '15C',
-      'className': 'Economy',
-    },
-    {
-      'seatID': 8,
-      'aircraftModel': 'Boeing 777-300ER',
-      'seatNumber': '1A',
-      'className': 'First Class',
-    },
-    // Sayfalama testi için veri üretelim
-    ...List.generate(
-      20,
-      (index) => {
-        'seatID': 9 + index,
-        'aircraftModel': index % 2 == 0 ? 'Airbus A350' : 'Boeing 737-800',
-        'seatNumber': '${10 + index}F',
-        'className': 'Economy',
-      },
-    ),
-  ];
+  // --- LIFECYCLE ---
+  @override
+  void initState() {
+    super.initState();
+    _loadSeats();
+  }
+
+  // --- VERİ YÜKLEME ---
+  Future<void> _loadSeats() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final seats = await _adminService.getSeats();
+      if (mounted) {
+        setState(() {
+          _seats = seats;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading seats: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Koltuklar yüklenirken hata oluştu: ${e.toString()}')),
+        );
+      }
+    }
+  }
+
+  // Dinamik Listeler (veritabanından gelen verilerden oluşturulur)
+  List<String> get _aircraftOptions {
+    final models = _seats.map((s) => s.aircraftModel ?? '').where((m) => m.isNotEmpty).toSet().toList();
+    models.sort();
+    return models;
+  }
+
+  List<String> get _classOptions {
+    final classes = _seats.map((s) => s.className ?? '').where((c) => c.isNotEmpty).toSet().toList();
+    classes.sort();
+    return classes;
+  }
 
   // --- FİLTRELEME ---
-  List<Map<String, dynamic>> get _filteredSeats {
+  List<Seat> get _filteredSeats {
     return _seats.where((seat) {
       final matchesSearch =
-          seat['seatNumber'].toString().toLowerCase().contains(
-            _searchTerm.toLowerCase(),
-          ) ||
-          seat['aircraftModel'].toString().toLowerCase().contains(
-            _searchTerm.toLowerCase(),
-          );
+          (seat.seatNumber?.toLowerCase().contains(_searchTerm.toLowerCase()) ?? false) ||
+          (seat.aircraftModel?.toLowerCase().contains(_searchTerm.toLowerCase()) ?? false);
       final matchesFilter =
-          _filterAircraft.isEmpty || seat['aircraftModel'] == _filterAircraft;
+          _filterAircraft.isEmpty || seat.aircraftModel == _filterAircraft;
       return matchesSearch && matchesFilter;
     }).toList();
   }
@@ -128,12 +107,12 @@ class _SeatsScreenState extends State<SeatsScreen> {
   // --- CRUD İŞLEMLERİ ---
 
   // 1. TEKLİ EKLEME / DÜZENLEME MODALI
-  void _showSeatDialog({Map<String, dynamic>? seat}) {
+  void _showSeatDialog({Seat? seat}) {
     if (seat != null) {
-      _selectedAircraft = seat['aircraftModel'];
-      _selectedClass = seat['className'];
-      _seatNumController.text = seat['seatNumber'];
+      // Düzenleme modu: Sadece class değiştirilebilir
+      _selectedClass = seat.className;
     } else {
+      // Ekleme modu: Tüm alanlar editable
       _selectedAircraft = null;
       _selectedClass = null;
       _seatNumController.clear();
@@ -151,27 +130,53 @@ class _SeatsScreenState extends State<SeatsScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  DropdownButtonFormField<String>(
-                    value: _selectedAircraft,
-                    decoration: const InputDecoration(
-                      labelText: "Uçak Modeli",
-                      border: OutlineInputBorder(),
+                  // Düzenleme modunda: Uçak modeli readonly
+                  if (seat != null)
+                    TextFormField(
+                      initialValue: seat.aircraftModel ?? '',
+                      decoration: const InputDecoration(
+                        labelText: "Uçak Modeli",
+                        border: OutlineInputBorder(),
+                        filled: true,
+                        fillColor: Colors.grey,
+                      ),
+                      enabled: false,
+                    )
+                  else
+                    DropdownButtonFormField<String>(
+                      value: _selectedAircraft,
+                      decoration: const InputDecoration(
+                        labelText: "Uçak Modeli",
+                        border: OutlineInputBorder(),
+                      ),
+                      items: _aircraftOptions
+                          .map((a) => DropdownMenuItem(value: a, child: Text(a)))
+                          .toList(),
+                      onChanged: (val) => setState(() => _selectedAircraft = val),
+                      validator: (v) => v == null ? "Seçiniz" : null,
                     ),
-                    items: _aircraftOptions
-                        .map((a) => DropdownMenuItem(value: a, child: Text(a)))
-                        .toList(),
-                    onChanged: (val) => setState(() => _selectedAircraft = val),
-                    validator: (v) => v == null ? "Seçiniz" : null,
-                  ),
                   const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _seatNumController,
-                    decoration: const InputDecoration(
-                      labelText: "Koltuk No (Örn: 12A)",
-                      border: OutlineInputBorder(),
+                  // Düzenleme modunda: Koltuk numarası readonly
+                  if (seat != null)
+                    TextFormField(
+                      initialValue: seat.seatNumber ?? '',
+                      decoration: const InputDecoration(
+                        labelText: "Koltuk No",
+                        border: OutlineInputBorder(),
+                        filled: true,
+                        fillColor: Colors.grey,
+                      ),
+                      enabled: false,
+                    )
+                  else
+                    TextFormField(
+                      controller: _seatNumController,
+                      decoration: const InputDecoration(
+                        labelText: "Koltuk No (Örn: 12A)",
+                        border: OutlineInputBorder(),
+                      ),
+                      validator: (v) => v!.isEmpty ? "Gerekli" : null,
                     ),
-                    validator: (v) => v!.isEmpty ? "Gerekli" : null,
-                  ),
                   const SizedBox(height: 16),
                   DropdownButtonFormField<String>(
                     value: _selectedClass,
@@ -200,29 +205,112 @@ class _SeatsScreenState extends State<SeatsScreen> {
               backgroundColor: Colors.teal,
               foregroundColor: Colors.white,
             ),
-            onPressed: () {
+            onPressed: seat != null ? () async {
+              // Düzenleme modu
               if (_formKey.currentState!.validate()) {
-                setState(() {
-                  if (seat != null) {
-                    final index = _seats.indexWhere(
-                      (s) => s['seatID'] == seat['seatID'],
-                    );
-                    _seats[index] = {
-                      'seatID': seat['seatID'],
-                      'aircraftModel': _selectedAircraft,
-                      'seatNumber': _seatNumController.text,
-                      'className': _selectedClass,
-                    };
-                  } else {
-                    _seats.insert(0, {
-                      'seatID': DateTime.now().millisecondsSinceEpoch,
-                      'aircraftModel': _selectedAircraft,
-                      'seatNumber': _seatNumController.text,
-                      'className': _selectedClass,
-                    });
+                // Loading dialog göster
+                showDialog(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (dialogContext) => const Center(child: CircularProgressIndicator()),
+                );
+
+                try {
+                  final userId = AuthService().currentUserId;
+                  if (userId == null) {
+                    if (mounted) {
+                      Navigator.of(context, rootNavigator: true).pop(); // Loading dialog'u kapat
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Kullanıcı ID alınamadı. Lütfen tekrar giriş yapın.')),
+                      );
+                    }
+                    return;
                   }
-                });
-                Navigator.pop(context);
+
+                  await _adminService.updateSeat(
+                    seatId: seat.seatID!,
+                    className: _selectedClass ?? '',
+                    userId: userId,
+                  );
+
+                  if (mounted) {
+                    Navigator.of(context, rootNavigator: true).pop(); // Loading dialog'u kapat
+                    Navigator.pop(context); // Modal'ı kapat
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Koltuk başarıyla güncellendi.'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                    // Koltuk listesini yenile
+                    _loadSeats();
+                  }
+                } catch (e) {
+                  debugPrint('❌ Error updating seat: $e');
+                  if (mounted) {
+                    Navigator.of(context, rootNavigator: true).pop(); // Loading dialog'u kapat
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Hata: ${e.toString()}'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                }
+              }
+            } : () async {
+              // Ekleme modu
+              if (_formKey.currentState!.validate()) {
+                // Loading dialog göster
+                showDialog(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (dialogContext) => const Center(child: CircularProgressIndicator()),
+                );
+
+                try {
+                  final userId = AuthService().currentUserId;
+                  if (userId == null) {
+                    if (mounted) {
+                      Navigator.of(context, rootNavigator: true).pop(); // Loading dialog'u kapat
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Kullanıcı ID alınamadı. Lütfen tekrar giriş yapın.')),
+                      );
+                    }
+                    return;
+                  }
+
+                  await _adminService.addSeat(
+                    aircraftModel: _selectedAircraft ?? '',
+                    seatNumber: _seatNumController.text.trim(),
+                    className: _selectedClass ?? '',
+                    userId: userId,
+                  );
+
+                  if (mounted) {
+                    Navigator.of(context, rootNavigator: true).pop(); // Loading dialog'u kapat
+                    Navigator.pop(context); // Modal'ı kapat
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Koltuk başarıyla eklendi.'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                    // Koltuk listesini yenile
+                    _loadSeats();
+                  }
+                } catch (e) {
+                  debugPrint('❌ Error adding seat: $e');
+                  if (mounted) {
+                    Navigator.of(context, rootNavigator: true).pop(); // Loading dialog'u kapat
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Hata: ${e.toString()}'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                }
               }
             },
             child: Text(seat != null ? "Güncelle" : "Ekle"),
@@ -335,42 +423,8 @@ class _SeatsScreenState extends State<SeatsScreen> {
             ),
             onPressed: () {
               if (_bulkFormKey.currentState!.validate()) {
-                // Toplu Ekleme Mantığı
-                int start = int.parse(_startRowController.text);
-                int end = int.parse(_endRowController.text);
-                List<String> letters = _seatLettersController.text
-                    .split(',')
-                    .map((e) => e.trim())
-                    .toList();
-
-                List<Map<String, dynamic>> newSeats = [];
-                for (int i = start; i <= end; i++) {
-                  for (String letter in letters) {
-                    if (letter.isNotEmpty) {
-                      newSeats.add({
-                        'seatID':
-                            DateTime.now().millisecondsSinceEpoch +
-                            newSeats.length, // Benzersiz ID simülasyonu
-                        'aircraftModel': _bulkAircraft,
-                        'seatNumber': '$i$letter',
-                        'className': _bulkClass,
-                      });
-                    }
-                  }
-                }
-
-                setState(() {
-                  _seats.addAll(newSeats);
-                });
+                // TODO: Bulk Add API entegrasyonu eklenecek
                 Navigator.pop(context);
-
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(
-                      "${newSeats.length} koltuk başarıyla eklendi.",
-                    ),
-                  ),
-                );
               }
             },
             child: const Text("Oluştur"),
@@ -380,14 +434,16 @@ class _SeatsScreenState extends State<SeatsScreen> {
     );
   }
 
-  void _deleteSeat(int id) {
-    setState(() {
-      _seats.removeWhere((s) => s['seatID'] == id);
-    });
-  }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: const Color(0xFFF9FAFB),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
     // Sayfalama
     final filtered = _filteredSeats;
     final totalPages = (filtered.length / _itemsPerPage).ceil();
@@ -536,8 +592,6 @@ class _SeatsScreenState extends State<SeatsScreen> {
                       return _SeatCard(
                         seat: currentData[index],
                         onEdit: () => _showSeatDialog(seat: currentData[index]),
-                        onDelete: () =>
-                            _deleteSeat(currentData[index]['seatID']),
                       );
                     },
                   );
@@ -578,14 +632,12 @@ class _SeatsScreenState extends State<SeatsScreen> {
 
 // --- KOLTUK KARTI ---
 class _SeatCard extends StatelessWidget {
-  final Map<String, dynamic> seat;
+  final Seat seat;
   final VoidCallback onEdit;
-  final VoidCallback onDelete;
 
   const _SeatCard({
     required this.seat,
     required this.onEdit,
-    required this.onDelete,
   });
 
   @override
@@ -606,13 +658,15 @@ class _SeatCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(
-                seat['aircraftModel'],
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  fontSize: 13,
+              Expanded(
+                child: Text(
+                  seat.aircraftModel ?? '',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 13,
+                  ),
+                  overflow: TextOverflow.ellipsis,
                 ),
-                overflow: TextOverflow.ellipsis,
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
@@ -621,7 +675,7 @@ class _SeatCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(4),
                 ),
                 child: Text(
-                  seat['seatNumber'],
+                  seat.seatNumber ?? '',
                   style: TextStyle(
                     fontWeight: FontWeight.bold,
                     color: Colors.teal.shade700,
@@ -632,7 +686,7 @@ class _SeatCard extends StatelessWidget {
           ),
 
           Text(
-            seat['className'],
+            seat.className ?? '',
             style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
           ),
 
@@ -642,41 +696,6 @@ class _SeatCard extends StatelessWidget {
               InkWell(
                 onTap: onEdit,
                 child: Icon(Icons.edit, size: 18, color: Colors.teal.shade600),
-              ),
-              const SizedBox(width: 12),
-              InkWell(
-                onTap: () {
-                  showDialog(
-                    context: context,
-                    builder: (ctx) => AlertDialog(
-                      title: const Text("Silinsin mi?"),
-                      content: const Text(
-                        "Bu koltuğu silmek istediğinize emin misiniz?",
-                      ),
-                      actions: [
-                        TextButton(
-                          onPressed: () => Navigator.pop(ctx),
-                          child: const Text("İptal"),
-                        ),
-                        TextButton(
-                          onPressed: () {
-                            Navigator.pop(ctx);
-                            onDelete();
-                          },
-                          child: const Text(
-                            "Sil",
-                            style: TextStyle(color: Colors.red),
-                          ),
-                        ),
-                      ],
-                    ),
-                  );
-                },
-                child: Icon(
-                  Icons.delete_outline,
-                  size: 18,
-                  color: Colors.red.shade600,
-                ),
               ),
             ],
           ),

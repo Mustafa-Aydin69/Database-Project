@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'dart:math';
 import 'package:intl/intl.dart';
+import '../../../core/services/admin_service.dart';
+import '../../../core/services/auth_service.dart';
 
 class ReservationsScreen extends StatefulWidget {
   const ReservationsScreen({super.key});
@@ -18,10 +20,15 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
     _seatNoController.dispose();
     _priceController.dispose();
     _bookingDateController.dispose();
+    _passportNoController.dispose();
+    _ageController.dispose();
     super.dispose();
   }
 
   // --- STATE ---
+  final AdminService _adminService = AdminService();
+  bool _isLoading = true;
+  List<Reservation> _reservations = [];
   int _currentPage = 0;
   final int _itemsPerPage = 10;
   String _searchTerm = "";
@@ -33,14 +40,44 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
   final TextEditingController _seatNoController = TextEditingController();
   final TextEditingController _priceController = TextEditingController();
   final TextEditingController _bookingDateController = TextEditingController();
+  final TextEditingController _passportNoController = TextEditingController();
+  final TextEditingController _ageController = TextEditingController();
   String _selectedStatus = 'Pending';
   DateTime? _bookingDate;
 
   // Sabit Listeler
   final List<String> _statuses = ['Confirmed', 'Pending', 'Cancelled'];
 
-  // --- MOCK VERİLER (React'ten alındı) ---
-  List<Map<String, dynamic>> _reservations = [
+  @override
+  void initState() {
+    super.initState();
+    _loadReservations();
+  }
+
+  /// API'den rezervasyon listesini yükle
+  Future<void> _loadReservations() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final reservations = await _adminService.getReservations();
+      debugPrint('📥 Reservations loaded: ${reservations.length} items');
+      
+      setState(() {
+        _reservations = reservations;
+        _isLoading = false;
+      });
+    } catch (e) {
+      debugPrint('❌ Error loading reservations: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  // --- MOCK VERİLER (KALDIRILDI) ---
+  /* List<Map<String, dynamic>> _reservations = [
     {
       'id': 1,
       'passengerName': 'Ahmet Yılmaz',
@@ -101,15 +138,18 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
         'price': 1000.0 + (index * 50),
       },
     ),
-  ];
+  ]; */
 
   // --- FİLTRELEME ---
-  List<Map<String, dynamic>> get _filteredReservations {
+  List<Reservation> get _filteredReservations {
     return _reservations.where((r) {
-      return r['passengerName'].toString().toLowerCase().contains(
+      return (r.passengerName ?? '').toLowerCase().contains(
             _searchTerm.toLowerCase(),
           ) ||
-          r['flightNumber'].toString().toLowerCase().contains(
+          (r.flightCode ?? '').toLowerCase().contains(
+            _searchTerm.toLowerCase(),
+          ) ||
+          (r.customerName ?? '').toLowerCase().contains(
             _searchTerm.toLowerCase(),
           );
     }).toList();
@@ -117,37 +157,32 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
 
   // --- CRUD İŞLEMLERİ ---
 
-  Future<void> _selectDate(BuildContext context) async {
-    final DateTime? picked = await showDatePicker(
-      context: context,
-      initialDate: _bookingDate ?? DateTime.now(),
-      firstDate: DateTime(2023),
-      lastDate: DateTime(2025),
-    );
-    if (picked != null && picked != _bookingDate) {
-      setState(() {
-        _bookingDate = picked;
-        _bookingDateController.text = DateFormat('dd.MM.yyyy').format(picked);
-      });
-    }
-  }
-
-  void _showReservationDialog({Map<String, dynamic>? reservation}) {
+  void _showReservationDialog({Reservation? reservation}) {
     if (reservation != null) {
-      _passengerController.text = reservation['passengerName'];
-      _flightNoController.text = reservation['flightNumber'];
-      _seatNoController.text = reservation['seatNumber'];
-      _priceController.text = reservation['price'].toString();
-      _selectedStatus = reservation['status'];
-      _bookingDate = DateTime.parse(reservation['bookingDate']);
-      _bookingDateController.text = DateFormat(
-        'dd.MM.yyyy',
-      ).format(_bookingDate!);
+      _passengerController.text = reservation.passengerName ?? '';
+      _flightNoController.text = reservation.flightCode ?? '';
+      _seatNoController.text = reservation.seatNumber ?? '';
+      _priceController.text = reservation.totalAmount?.toString() ?? '';
+      _selectedStatus = reservation.reservationStatus ?? 'Pending';
+      if (reservation.reservationDate != null) {
+        try {
+          _bookingDate = DateTime.parse(reservation.reservationDate!);
+          _bookingDateController.text = DateFormat('dd.MM.yyyy').format(_bookingDate!);
+        } catch (e) {
+          _bookingDate = null;
+          _bookingDateController.clear();
+        }
+      } else {
+        _bookingDate = null;
+        _bookingDateController.clear();
+      }
     } else {
       _passengerController.clear();
       _flightNoController.clear();
       _seatNoController.clear();
       _priceController.clear();
+      _passportNoController.clear();
+      _ageController.clear();
       _selectedStatus = 'Pending';
       _bookingDate = null;
       _bookingDateController.clear();
@@ -215,8 +250,25 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
                       GestureDetector(
                         onTap: () async {
                           FocusScope.of(context).unfocus();
-                          await _selectDate(context);
-                          setDialogState(() {});
+                          final now = DateTime.now();
+                          final initialDate = _bookingDate ?? now;
+                          // initialDate lastDate'den sonra olamaz, bu yüzden kontrol ediyoruz
+                          final safeInitialDate = initialDate.isAfter(DateTime(2030, 12, 31))
+                              ? now
+                              : initialDate;
+                          
+                          final DateTime? picked = await showDatePicker(
+                            context: context,
+                            initialDate: safeInitialDate,
+                            firstDate: DateTime(2023),
+                            lastDate: DateTime(2030, 12, 31),
+                          );
+                          if (picked != null) {
+                            setDialogState(() {
+                              _bookingDate = picked;
+                              _bookingDateController.text = DateFormat('dd.MM.yyyy').format(picked);
+                            });
+                          }
                         },
                         child: AbsorbPointer(
                           child: TextFormField(
@@ -231,6 +283,42 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
                                 _bookingDate == null ? "Tarih seçiniz" : null,
                           ),
                         ),
+                      ),
+                      const SizedBox(height: 16),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: TextFormField(
+                              controller: _passportNoController,
+                              decoration: const InputDecoration(
+                                labelText: "Pasaport No",
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.badge),
+                              ),
+                              validator: (v) => v!.isEmpty ? "Zorunlu alan" : null,
+                            ),
+                          ),
+                          const SizedBox(width: 16),
+                          Expanded(
+                            child: TextFormField(
+                              controller: _ageController,
+                              decoration: const InputDecoration(
+                                labelText: "Yaş",
+                                border: OutlineInputBorder(),
+                                prefixIcon: Icon(Icons.cake),
+                              ),
+                              keyboardType: TextInputType.number,
+                              validator: (v) {
+                                if (v!.isEmpty) return "Zorunlu alan";
+                                final age = int.tryParse(v);
+                                if (age == null || age < 0 || age > 150) {
+                                  return "Geçerli bir yaş giriniz";
+                                }
+                                return null;
+                              },
+                            ),
+                          ),
+                        ],
                       ),
                       const SizedBox(height: 16),
                       Row(
@@ -284,40 +372,16 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
                   backgroundColor: Colors.teal,
                   foregroundColor: Colors.white,
                 ),
-                onPressed: () {
+                onPressed: () async {
                   if (_formKey.currentState!.validate() &&
                       _bookingDate != null) {
-                    setState(() {
-                      if (reservation != null) {
-                        final index = _reservations.indexWhere(
-                          (r) => r['id'] == reservation['id'],
-                        );
-                        _reservations[index] = {
-                          'id': reservation['id'],
-                          'passengerName': _passengerController.text,
-                          'flightNumber': _flightNoController.text,
-                          'seatNumber': _seatNoController.text,
-                          'bookingDate': DateFormat(
-                            'yyyy-MM-dd',
-                          ).format(_bookingDate!),
-                          'status': _selectedStatus,
-                          'price': double.parse(_priceController.text),
-                        };
-                      } else {
-                        _reservations.insert(0, {
-                          'id': DateTime.now().millisecondsSinceEpoch,
-                          'passengerName': _passengerController.text,
-                          'flightNumber': _flightNoController.text,
-                          'seatNumber': _seatNoController.text,
-                          'bookingDate': DateFormat(
-                            'yyyy-MM-dd',
-                          ).format(_bookingDate!),
-                          'status': _selectedStatus,
-                          'price': double.parse(_priceController.text),
-                        });
-                      }
-                    });
-                    Navigator.pop(context);
+                    if (reservation == null) {
+                      // Yeni rezervasyon ekle
+                      await _addReservation(context);
+                    } else {
+                      // TODO: Update işlemi (şimdilik sadece ekleme var)
+                      Navigator.pop(context);
+                    }
                   }
                 },
                 child: Text(reservation != null ? "Güncelle" : "Ekle"),
@@ -327,6 +391,138 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
         },
       ),
     );
+  }
+
+  Future<void> _addReservation(BuildContext context) async {
+    // UserID'yi al (rezervasyonu yapan müşteri - şimdilik current user)
+    final customerUserId = AuthService().currentUserId;
+    if (customerUserId == null) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Kullanıcı bilgisi bulunamadı. Lütfen tekrar giriş yapın."),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+
+    // CreatedByUserID (işlemi yapan admin)
+    final createdByUserId = AuthService().currentUserId!;
+
+    // Form verilerini al
+    final passengerName = _passengerController.text.trim();
+    final passengerParts = passengerName.split(' ');
+    final firstName = passengerParts.isNotEmpty ? passengerParts[0] : '';
+    final lastName = passengerParts.length > 1 
+        ? passengerParts.sublist(1).join(' ') 
+        : '';
+
+    if (firstName.isEmpty || lastName.isEmpty) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Yolcu adı ve soyadı gereklidir."),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+
+    // FlightID'yi al (FlightNo'dan - şimdilik direkt sayısal değer olarak kullan)
+    final flightNo = _flightNoController.text.trim();
+    final flightId = int.tryParse(flightNo.replaceAll(RegExp(r'[^0-9]'), '')) ?? 
+                     int.tryParse(flightNo) ?? 0;
+    
+    if (flightId == 0) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Geçerli bir uçuş numarası giriniz."),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+
+    // SeatID'yi al (SeatNo'dan - şimdilik direkt sayısal değer olarak kullan)
+    final seatNo = _seatNoController.text.trim();
+    final seatId = seatNo.isNotEmpty 
+        ? int.tryParse(seatNo.replaceAll(RegExp(r'[^0-9]'), ''))
+        : null;
+
+    // TotalAmount'u al
+    final totalAmount = double.tryParse(_priceController.text.trim()) ?? 0.0;
+    if (totalAmount <= 0) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Geçerli bir fiyat giriniz."),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+
+    // PassportNo ve Age'yi al
+    final passportNo = _passportNoController.text.trim();
+    final age = int.tryParse(_ageController.text.trim()) ?? 0;
+
+    if (passportNo.isEmpty || age <= 0) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Pasaport numarası ve yaş gereklidir."),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+      return;
+    }
+
+    // Rezervasyon ekle
+    final reservationId = await _adminService.addReservation(
+      userId: customerUserId,
+      flightId: flightId,
+      reservationDate: _bookingDate!,
+      status: _selectedStatus,
+      totalAmount: totalAmount,
+      passengerFirstName: firstName,
+      passengerLastName: lastName,
+      passportNo: passportNo,
+      age: age,
+      gender: null,
+      nationality: null,
+      seatId: seatId,
+      boardingGate: null,
+      ticketStatus: 'Confirmed',
+      createdByUserId: createdByUserId,
+    );
+
+    if (mounted) {
+      if (reservationId != null) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text("Rezervasyon başarıyla oluşturuldu. ID: $reservationId"),
+            backgroundColor: Colors.green,
+          ),
+        );
+        Navigator.pop(context);
+        // Listeyi yenile
+        _loadReservations();
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("Rezervasyon oluşturulurken bir hata oluştu."),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   void _deleteReservation(int id) {
@@ -343,9 +539,48 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
             child: const Text("İptal"),
           ),
           TextButton(
-            onPressed: () {
-              setState(() => _reservations.removeWhere((r) => r['id'] == id));
+            onPressed: () async {
               Navigator.pop(context);
+              
+              // UserID'yi al
+              final userId = AuthService().currentUserId;
+              if (userId == null) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Kullanıcı bilgisi bulunamadı. Lütfen tekrar giriş yapın."),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+                return;
+              }
+
+              // Silme işlemini gerçekleştir
+              final success = await _adminService.deleteReservation(
+                reservationId: id,
+                userId: userId,
+              );
+
+              if (mounted) {
+                if (success) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Rezervasyon başarıyla silindi."),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                  // Listeyi yenile
+                  _loadReservations();
+                } else {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Rezervasyon silinirken bir hata oluştu."),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+              }
             },
             child: const Text("Sil", style: TextStyle(color: Colors.red)),
           ),
@@ -435,15 +670,19 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
             const SizedBox(height: 24),
 
             // --- KART LİSTESİ ---
-            if (currentData.isEmpty)
-              const Center(
-                child: Padding(
-                  padding: EdgeInsets.all(40),
-                  child: Text("Rezervasyon bulunamadı."),
-                ),
-              )
-            else
-              LayoutBuilder(
+            _isLoading
+                ? const Center(
+                    child: Padding(
+                        padding: EdgeInsets.all(40),
+                        child: CircularProgressIndicator()))
+                : currentData.isEmpty
+                    ? const Center(
+                        child: Padding(
+                          padding: EdgeInsets.all(40),
+                          child: Text("Rezervasyon bulunamadı."),
+                        ),
+                      )
+                    : LayoutBuilder(
                 builder: (context, constraints) {
                   int crossAxisCount = constraints.maxWidth > 1100
                       ? 3
@@ -460,12 +699,13 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
                     itemCount: currentData.length,
                     itemBuilder: (context, index) {
                       return _ReservationCard(
+                        key: ValueKey(currentData[index].reservationId ?? index),
                         reservation: currentData[index],
                         onEdit: () => context.go(
-                          '/admin/reservations/${currentData[index]['id']}',
+                          '/admin/reservations/${currentData[index].reservationId ?? 0}',
                         ),
                         onDelete: () =>
-                            _deleteReservation(currentData[index]['id']),
+                            _deleteReservation(currentData[index].reservationId ?? 0),
                       );
                     },
                   );
@@ -501,19 +741,22 @@ class _ReservationsScreenState extends State<ReservationsScreen> {
 
 // --- REZERVASYON KARTI ---
 class _ReservationCard extends StatelessWidget {
-  final Map<String, dynamic> reservation;
+  final Reservation reservation;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
   const _ReservationCard({
+    Key? key,
     required this.reservation,
     required this.onEdit,
     required this.onDelete,
-  });
+  }) : super(key: key);
 
-  Color _getStatusColor(String status) {
+  Color _getStatusColor(String? status) {
+    if (status == null) return Colors.grey;
     switch (status) {
       case 'Confirmed':
+      case 'Active':
         return Colors.green;
       case 'Pending':
         return Colors.orange;
@@ -526,12 +769,23 @@ class _ReservationCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final statusColor = _getStatusColor(reservation['status']);
+    final statusColor = _getStatusColor(reservation.reservationStatus);
     final currencyFormat = NumberFormat.currency(
       locale: 'tr_TR',
       symbol: '₺',
       decimalDigits: 0,
     );
+
+    // Tarih formatla
+    String formattedDate = 'N/A';
+    if (reservation.reservationDate != null) {
+      try {
+        final date = DateTime.parse(reservation.reservationDate!);
+        formattedDate = DateFormat('dd.MM.yyyy').format(date);
+      } catch (e) {
+        formattedDate = reservation.reservationDate ?? 'N/A';
+      }
+    }
 
     return Container(
       padding: const EdgeInsets.all(16),
@@ -552,7 +806,7 @@ class _ReservationCard extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  reservation['passengerName'],
+                  reservation.passengerName ?? reservation.customerName ?? 'N/A',
                   style: const TextStyle(
                     fontWeight: FontWeight.bold,
                     fontSize: 16,
@@ -567,7 +821,7 @@ class _ReservationCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(8),
                 ),
                 child: Text(
-                  reservation['status'],
+                  reservation.reservationStatus ?? 'N/A',
                   style: TextStyle(
                     fontSize: 11,
                     fontWeight: FontWeight.bold,
@@ -585,7 +839,7 @@ class _ReservationCard extends StatelessWidget {
               const Icon(Icons.flight, size: 16, color: Colors.grey),
               const SizedBox(width: 8),
               Text(
-                reservation['flightNumber'],
+                reservation.flightCode ?? 'N/A',
                 style: const TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w500,
@@ -595,7 +849,7 @@ class _ReservationCard extends StatelessWidget {
               const Icon(Icons.event_seat, size: 16, color: Colors.grey),
               const SizedBox(width: 8),
               Text(
-                reservation['seatNumber'],
+                reservation.seatNumber ?? 'N/A',
                 style: const TextStyle(
                   fontSize: 13,
                   fontWeight: FontWeight.w500,
@@ -609,7 +863,7 @@ class _ReservationCard extends StatelessWidget {
               const Icon(Icons.calendar_today, size: 16, color: Colors.grey),
               const SizedBox(width: 8),
               Text(
-                reservation['bookingDate'],
+                formattedDate,
                 style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
               ),
             ],
@@ -621,7 +875,9 @@ class _ReservationCard extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                currencyFormat.format(reservation['price']),
+                reservation.totalAmount != null
+                    ? currencyFormat.format(reservation.totalAmount!)
+                    : 'N/A',
                 style: const TextStyle(
                   fontWeight: FontWeight.bold,
                   fontSize: 16,

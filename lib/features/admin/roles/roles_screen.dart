@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
+import '../../../core/services/admin_service.dart';
+import '../../../core/services/auth_service.dart';
 
 class RolesScreen extends StatefulWidget {
   const RolesScreen({super.key});
@@ -12,32 +14,65 @@ class _RolesScreenState extends State<RolesScreen> {
   // --- STATE ---
   int _currentPage = 0;
   final int _itemsPerPage = 10;
+  bool _isLoading = true;
+  final AdminService _adminService = AdminService();
 
   // Form Kontrolcüleri
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _roleNameController = TextEditingController();
   final TextEditingController _descController = TextEditingController();
 
-  // --- MOCK VERİLER (React'ten alındı + Test için çoğaltıldı) ---
-  List<Map<String, dynamic>> _roles = [
-    {'id': 1, 'roleName': 'Admin', 'description': 'Tam yetki sahibi sistem yöneticisi'},
-    {'id': 2, 'roleName': 'Staff', 'description': 'Genel personel yetkisi'},
-    {'id': 3, 'roleName': 'ParkingManager', 'description': 'Otopark yönetim yetkisi'},
-    // Sayfalamayı test etmek için veri üretelim
-    ...List.generate(12, (index) => {
-      'id': 4 + index,
-      'roleName': 'Custom Role ${index + 1}',
-      'description': 'Özel tanımlanmış yetki seviyesi ${index + 1}'
-    }),
-  ];
+  // --- VERİLER ---
+  List<AdminRole> _roles = [];
+
+  // --- LIFECYCLE ---
+  @override
+  void initState() {
+    super.initState();
+    _loadRoles();
+  }
+
+  @override
+  void dispose() {
+    _roleNameController.dispose();
+    _descController.dispose();
+    super.dispose();
+  }
+
+  // --- VERİ YÜKLEME ---
+  Future<void> _loadRoles() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final roles = await _adminService.getRoles();
+      if (mounted) {
+        setState(() {
+          _roles = roles;
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading roles: $e');
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Roller yüklenirken hata oluştu: ${e.toString()}')),
+        );
+      }
+    }
+  }
 
   // --- CRUD İŞLEMLERİ ---
 
   // Ekleme/Düzenleme Dialogu
-  void _showRoleDialog({Map<String, dynamic>? role}) {
+  void _showRoleDialog({AdminRole? role}) {
     if (role != null) {
-      _roleNameController.text = role['roleName'];
-      _descController.text = role['description'];
+      _roleNameController.text = role.roleName ?? '';
+      _descController.text = role.description ?? '';
     } else {
       _roleNameController.clear();
       _descController.clear();
@@ -88,27 +123,110 @@ class _RolesScreenState extends State<RolesScreen> {
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
-            onPressed: () {
+            onPressed: role != null ? () async {
               if (_formKey.currentState!.validate()) {
-                setState(() {
-                  if (role != null) {
-                    // Güncelle
-                    final index = _roles.indexWhere((r) => r['id'] == role['id']);
-                    _roles[index] = {
-                      'id': role['id'],
-                      'roleName': _roleNameController.text,
-                      'description': _descController.text,
-                    };
-                  } else {
-                    // Ekle
-                    _roles.insert(0, {
-                      'id': DateTime.now().millisecondsSinceEpoch,
-                      'roleName': _roleNameController.text,
-                      'description': _descController.text,
-                    });
+                // Loading dialog göster
+                showDialog(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (dialogContext) => const Center(child: CircularProgressIndicator()),
+                );
+
+                try {
+                  final adminUserId = AuthService().currentUserId;
+                  if (adminUserId == null) {
+                    if (mounted) {
+                      Navigator.of(context, rootNavigator: true).pop(); // Loading dialog'u kapat
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Kullanıcı ID alınamadı. Lütfen tekrar giriş yapın.')),
+                      );
+                    }
+                    return;
                   }
-                });
-                Navigator.pop(context);
+
+                  await _adminService.updateRole(
+                    roleId: role.id!,
+                    roleName: _roleNameController.text.trim(),
+                    description: _descController.text.trim(),
+                    adminUserId: adminUserId,
+                  );
+
+                  if (mounted) {
+                    Navigator.of(context, rootNavigator: true).pop(); // Loading dialog'u kapat
+                    Navigator.pop(context); // Modal'ı kapat
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Rol başarıyla güncellendi.'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                    // Rol listesini yenile
+                    _loadRoles();
+                  }
+                } catch (e) {
+                  debugPrint('❌ Error updating role: $e');
+                  if (mounted) {
+                    Navigator.of(context, rootNavigator: true).pop(); // Loading dialog'u kapat
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Hata: ${e.toString()}'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                }
+              }
+            } : () async {
+              if (_formKey.currentState!.validate()) {
+                // Loading dialog göster
+                showDialog(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (dialogContext) => const Center(child: CircularProgressIndicator()),
+                );
+
+                try {
+                  final adminUserId = AuthService().currentUserId;
+                  if (adminUserId == null) {
+                    if (mounted) {
+                      Navigator.of(context, rootNavigator: true).pop(); // Loading dialog'u kapat
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Kullanıcı ID alınamadı. Lütfen tekrar giriş yapın.')),
+                      );
+                    }
+                    return;
+                  }
+
+                  await _adminService.addRole(
+                    roleName: _roleNameController.text.trim(),
+                    description: _descController.text.trim(),
+                    adminUserId: adminUserId,
+                  );
+
+                  if (mounted) {
+                    Navigator.of(context, rootNavigator: true).pop(); // Loading dialog'u kapat
+                    Navigator.pop(context); // Modal'ı kapat
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text('Rol başarıyla eklendi.'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                    // Rol listesini yenile
+                    _loadRoles();
+                  }
+                } catch (e) {
+                  debugPrint('❌ Error adding role: $e');
+                  if (mounted) {
+                    Navigator.of(context, rootNavigator: true).pop(); // Loading dialog'u kapat
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Hata: ${e.toString()}'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                }
               }
             },
             child: Text(role != null ? "Güncelle" : "Ekle"),
@@ -119,30 +237,98 @@ class _RolesScreenState extends State<RolesScreen> {
   }
 
   // Silme İşlemi
-  void _deleteRole(int id) {
-    showDialog(
+  void _deleteRole(int id) async {
+    final adminUserId = AuthService().currentUserId;
+    if (adminUserId == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Kullanıcı ID alınamadı. Lütfen tekrar giriş yapın.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
+    // Onay modalı göster
+    final shouldDelete = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
         title: const Text("Emin misiniz?"),
         content: const Text("Bu rolü silmek istediğinizden emin misiniz?"),
         actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
           TextButton(
-            onPressed: () {
-              setState(() {
-                _roles.removeWhere((r) => r['id'] == id);
-              });
-              Navigator.pop(context);
-            },
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text("İptal"),
+          ),
+          TextButton(
+            onPressed: () => Navigator.pop(context, true),
             child: const Text("Sil", style: TextStyle(color: Colors.red)),
           ),
         ],
       ),
     );
+
+    if (shouldDelete != true) {
+      return; // Kullanıcı iptal etti
+    }
+
+    // Loading dialog göster
+    if (mounted) {
+      showDialog(
+        context: context,
+        barrierDismissible: false,
+        builder: (loadingContext) => const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    try {
+      await _adminService.deleteRole(
+        roleId: id,
+        adminUserId: adminUserId,
+      );
+
+      // Loading dialog'u kapat
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Rol başarıyla silindi.'),
+            backgroundColor: Colors.green,
+          ),
+        );
+        // Rol listesini yenile
+        _loadRoles();
+      }
+    } catch (e) {
+      debugPrint('❌ Error deleting role: $e');
+      // Loading dialog'u kapat
+      if (mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+      }
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text('Hata: ${e.toString()}'),
+            backgroundColor: Colors.red,
+          ),
+        );
+      }
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: const Color(0xFFF9FAFB),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
     // Sayfalama Mantığı
     final totalPages = (_roles.length / _itemsPerPage).ceil();
     if (_currentPage >= totalPages && totalPages > 0) _currentPage = totalPages - 1;
@@ -208,7 +394,7 @@ class _RolesScreenState extends State<RolesScreen> {
                       return _RoleCard(
                         role: currentData[index],
                         onEdit: () => _showRoleDialog(role: currentData[index]),
-                        onDelete: () => _deleteRole(currentData[index]['id']),
+                        onDelete: () => _deleteRole(currentData[index].id ?? 0),
                       );
                     },
                   );
@@ -245,7 +431,7 @@ class _RolesScreenState extends State<RolesScreen> {
 
 // --- ROL KARTI ---
 class _RoleCard extends StatelessWidget {
-  final Map<String, dynamic> role;
+  final AdminRole role;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
@@ -270,13 +456,13 @@ class _RoleCard extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                role['roleName'],
+                role.roleName ?? '',
                 style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(color: Colors.grey.shade100, borderRadius: BorderRadius.circular(4)),
-                child: Text("ID: ${role['id']}", style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
+                child: Text("ID: ${role.id ?? 'N/A'}", style: TextStyle(fontSize: 11, color: Colors.grey.shade600)),
               ),
             ],
           ),
@@ -286,7 +472,7 @@ class _RoleCard extends StatelessWidget {
           // Orta Kısım: Açıklama
           Expanded(
             child: Text(
-              role['description'],
+              role.description ?? '',
               style: TextStyle(color: Colors.grey.shade600, fontSize: 13),
               maxLines: 2,
               overflow: TextOverflow.ellipsis,

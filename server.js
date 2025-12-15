@@ -3,6 +3,8 @@ const express = require('express');
 const cors = require('cors');
 const authRoutes = require('./routes/auth');
 const checkinRoutes = require('./routes/checkin');
+const parkingRoutes = require('./routes/parking');
+const adminRoutes = require('./routes/admin');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -15,6 +17,13 @@ app.use(express.urlencoded({ extended: true }));
 // Routes
 app.use('/api', authRoutes);
 app.use('/api/checkin', checkinRoutes);
+app.use('/api/parking', parkingRoutes);
+app.use('/api/admin', adminRoutes);
+
+// Debug: Route registration
+console.log('📋 Registered routes:');
+console.log('  - /api/parking/payment-statistics');
+console.log('  - /api/parking/payment-list');
 
 // Health check endpoint
 app.get('/health', (req, res) => {
