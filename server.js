@@ -45,6 +45,95 @@ app.get('/api/flight-classes', async (req, res) => {
     return res.status(500).json({ message: 'Failed to fetch flight classes' });
   }
 });
+app.get('/api/admin/airlines', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const result = await pool.request().execute('FlightReservationSystem.usp_GetAirlines');
+    const rows = (result.recordset || []).map((row) => ({
+      airlineId: parseInt(row.AirlineID ?? row.airlineId ?? 0) || 0,
+      name: row.Name ?? row.AirlineName ?? row.airlineName ?? '',
+    }));
+    return res.status(200).json(rows);
+  } catch (err) {
+    console.error('Admin airlines fetch error:', err);
+    return res.status(500).json({ message: 'Failed to fetch airlines' });
+  }
+});
+app.get('/api/admin/airports', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const request = pool.request();
+    const result = await request.execute('FlightReservationSystem.usp_GetAirports');
+    return res.json(result.recordset || []);
+  } catch (err) {
+    const info = err?.originalError?.info;
+    console.error('Admin airports fetch error:', {
+      message: info?.message || err?.message,
+      number: info?.number,
+      state: info?.state,
+      class: info?.class,
+      lineNumber: info?.lineNumber,
+      procedure: info?.procName || info?.procedure,
+      code: err?.code,
+      stack: err?.stack,
+      preceding: err?.precedingErrors?.map((e) => e?.message),
+    });
+    return res.status(500).json({ message: 'Failed to fetch airports', error: String(err?.message || err) });
+  }
+});
+app.get('/api/admin/aircrafts', async (req, res) => {
+  try {
+    const airlineIdRaw = req.query.airlineId;
+    const airlineId = parseInt(airlineIdRaw);
+    if (!Number.isInteger(airlineId) || airlineId <= 0) {
+      return res.status(400).json({ message: 'Invalid airlineId' });
+    }
+    const pool = await getPool();
+    const request = pool.request();
+    request.input('AirlineID', sql.Int, airlineId);
+    let result;
+    try {
+      result = await request.execute('FlightReservationSystem.usp_GetAircraftsByAirline');
+    } catch (execErr) {
+      try {
+        const alt = await pool.request().execute('FlightReservationSystem.usp_GetAircrafts');
+        const all = alt.recordset || [];
+        const filtered = all.filter((row) => {
+          const aidRaw = row.AirlineID ?? row.airlineId ?? null;
+          const aid = aidRaw === null || aidRaw === undefined ? null : parseInt(aidRaw);
+          const statusRaw = row.Status ?? row.status ?? null;
+          const status = typeof statusRaw === 'string' ? statusRaw.trim().toLowerCase() : null;
+          return aid === airlineId && (status === null || status === 'active');
+        });
+        result = { recordset: filtered };
+      } catch (queryErr) {
+        const info = queryErr?.originalError?.info;
+        console.error('Admin aircrafts fallback query error:', {
+          message: info?.message || queryErr?.message,
+          number: info?.number,
+          code: queryErr?.code,
+          stack: queryErr?.stack,
+        });
+        return res.status(500).json({ message: 'Failed to fetch aircrafts' });
+      }
+    }
+    const rows = (result.recordset || []).map((row) => ({
+      aircraftId: parseInt(row.AircraftID ?? row.aircraftId ?? 0) || 0,
+      model: row.Model ?? row.model ?? '',
+      capacity: parseInt(row.Capacity ?? row.capacity ?? 0) || 0,
+    }));
+    return res.status(200).json(rows);
+  } catch (err) {
+    const info = err?.originalError?.info;
+    console.error('Admin aircrafts by airline fetch error:', {
+      message: info?.message || err?.message,
+      number: info?.number,
+      code: err?.code,
+      stack: err?.stack,
+    });
+    return res.status(500).json({ message: 'Failed to fetch aircrafts' });
+  }
+});
 
 app.put('/api/flight-classes/:classId', async (req, res) => {
   try {
@@ -178,12 +267,19 @@ app.get('/api/aircrafts', async (req, res) => {
   try {
     const pool = await getPool();
     const result = await pool.request().execute('FlightReservationSystem.usp_GetAircrafts');
-    const rows = (result.recordset || []).map((row) => ({
-      aircraftId: parseInt(row.AircraftID ?? row.aircraftId ?? 0) || 0,
-      airlineId: row.AirlineID === null || row.AirlineID === undefined ? null : parseInt(row.AirlineID ?? row.airlineId),
-      model: row.Model ?? row.model ?? '',
-      capacity: parseInt(row.Capacity ?? row.capacity ?? 0) || 0,
-    }));
+    const rows = (result.recordset || [])
+      .filter((row) => {
+        const statusRaw = row.Status ?? row.status ?? null;
+        const status = typeof statusRaw === 'string' ? statusRaw.trim().toLowerCase() : null;
+        return status === null || status === 'active';
+      })
+      .map((row) => ({
+        aircraftId: parseInt(row.AircraftID ?? row.aircraftId ?? 0) || 0,
+        airlineId: row.AirlineID === null || row.AirlineID === undefined ? null : parseInt(row.AirlineID ?? row.airlineId),
+        model: row.Model ?? row.model ?? '',
+        capacity: parseInt(row.Capacity ?? row.capacity ?? 0) || 0,
+        status: (row.Status ?? row.status ?? 'Active'),
+      }));
     return res.status(200).json(rows);
   } catch (err) {
     console.error('Aircrafts fetch error:', err);
@@ -191,6 +287,43 @@ app.get('/api/aircrafts', async (req, res) => {
   }
 });
 
+app.patch('/api/aircrafts/:aircraftId/soft-delete', async (req, res) => {
+  try {
+    const idRaw = req.params.aircraftId;
+    const aircraftId = parseInt(idRaw);
+    if (!Number.isInteger(aircraftId) || aircraftId <= 0) {
+      return res.status(400).json({ message: 'Invalid aircraftId' });
+    }
+    const pool = await getPool();
+    const request = pool.request();
+    request.input('AircraftID', sql.Int, aircraftId);
+    const result = await request.execute('FlightReservationSystem.usp_SoftDeleteAircraft');
+    const row = (result.recordset && result.recordset[0]) || null;
+    if (!row) {
+      return res.status(400).json({ message: 'Aircraft not found or already inactive' });
+    }
+    const data = {
+      aircraftId: parseInt(row.AircraftID ?? aircraftId) || aircraftId,
+      airlineId: row.AirlineID === null || row.AirlineID === undefined ? null : parseInt(row.AirlineID ?? row.airlineId),
+      model: row.Model ?? '',
+      capacity: parseInt(row.Capacity ?? 0) || 0,
+      status: row.Status ?? 'Inactive',
+    };
+    return res.status(200).json(data);
+  } catch (err) {
+    console.error('PATCH /api/aircrafts/:aircraftId/soft-delete error:', err);
+    const info = err?.originalError?.info;
+    const msg =
+      info?.message ||
+      (err?.precedingErrors && err.precedingErrors[0]?.message) ||
+      err?.message ||
+      'Failed to delete aircraft';
+    if (/not found|already inactive|does not exist/i.test(msg)) {
+      return res.status(400).json({ message: msg });
+    }
+    return res.status(500).json({ message: 'Failed to delete aircraft' });
+  }
+});
 app.get('/api/airlines', async (req, res) => {
   try {
     const pool = await getPool();
@@ -205,7 +338,109 @@ app.get('/api/airlines', async (req, res) => {
     return res.status(500).json({ message: 'Failed to fetch airlines' });
   }
 });
+app.get('/api/admin/flights', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const result = await pool.request().execute('FlightReservationSystem.usp_GetFlights_Simple');
+    const rows = (result.recordset || []).map((row) => {
+      const sRaw = row.Status ?? row.status ?? '';
+      const sLower = typeof sRaw === 'string' ? sRaw.trim().toLowerCase() : '';
+      const status =
+        sLower === 'cancelled' || sLower === 'canceled' ? 'Canceled' :
+        (typeof sRaw === 'string' ? sRaw : '');
+      return {
+        flightID: parseInt(row.FlightID ?? row.flightId ?? 0) || 0,
+        airline: row.AirlineName ?? row.airlineName ?? '',
+        aircraft: row.AircraftModel ?? row.aircraftModel ?? '',
+        departureAirport: row.DepartureIATA ?? row.departureIata ?? '',
+        arrivalAirport: row.ArrivalIATA ?? row.arrivalIata ?? '',
+        departureTime: row.DepartureTime ?? row.departureTime ?? '',
+        arrivalTime: row.ArrivalTime ?? row.arrivalTime ?? '',
+        status,
+      };
+    });
+    return res.status(200).json(rows);
+  } catch (err) {
+    console.error('Admin flights fetch error:', err);
+    return res.status(500).json({ message: 'Failed to fetch flights' });
+  }
+});
 
+app.post('/api/admin/flights', async (req, res) => {
+  try {
+    const airlineId = parseInt(req.body?.airlineId);
+    const aircraftId = parseInt(req.body?.aircraftId);
+    const departureAirportId = parseInt(req.body?.departureAirportId);
+    const arrivalAirportId = parseInt(req.body?.arrivalAirportId);
+    const departureTimeStr = (req.body?.departureTime ?? '').toString().trim();
+    const arrivalTimeStr = (req.body?.arrivalTime ?? '').toString().trim();
+    let status = (req.body?.status ?? '').toString().trim();
+    const normalize = (s) => {
+      const t = s.toLowerCase();
+      if (t === 'cancelled' || t === 'canceled') return 'Canceled';
+      if (t === 'scheduled') return 'Scheduled';
+      if (t === 'delayed') return 'Delayed';
+      if (t === 'completed') return 'Completed';
+      return s;
+    };
+    status = normalize(status);
+    if (!Number.isInteger(airlineId) || airlineId <= 0) {
+      return res.status(400).json({ message: 'Invalid airlineId' });
+    }
+    if (!Number.isInteger(aircraftId) || aircraftId <= 0) {
+      return res.status(400).json({ message: 'Invalid aircraftId' });
+    }
+    if (!Number.isInteger(departureAirportId) || departureAirportId <= 0) {
+      return res.status(400).json({ message: 'Invalid departureAirportId' });
+    }
+    if (!Number.isInteger(arrivalAirportId) || arrivalAirportId <= 0) {
+      return res.status(400).json({ message: 'Invalid arrivalAirportId' });
+    }
+    if (departureAirportId === arrivalAirportId) {
+      return res.status(400).json({ message: 'Departure and arrival airports must be different' });
+    }
+    if (!departureTimeStr || !arrivalTimeStr) {
+      return res.status(400).json({ message: 'DepartureTime and ArrivalTime are required' });
+    }
+    const dep = new Date(departureTimeStr.replace(' ', 'T'));
+    const arr = new Date(arrivalTimeStr.replace(' ', 'T'));
+    if (!(dep instanceof Date) || isNaN(dep.valueOf())) {
+      return res.status(400).json({ message: 'Invalid departureTime' });
+    }
+    if (!(arr instanceof Date) || isNaN(arr.valueOf())) {
+      return res.status(400).json({ message: 'Invalid arrivalTime' });
+    }
+    if (arr.valueOf() <= dep.valueOf()) {
+      return res.status(400).json({ message: 'ArrivalTime must be after DepartureTime' });
+    }
+    const pool = await getPool();
+    const request = pool.request();
+    request.input('AirlineID', sql.Int, airlineId);
+    request.input('AircraftID', sql.Int, aircraftId);
+    request.input('DepartureAirportID', sql.Int, departureAirportId);
+    request.input('ArrivalAirportID', sql.Int, arrivalAirportId);
+    request.input('DepartureTime', sql.DateTime, dep);
+    request.input('ArrivalTime', sql.DateTime, arr);
+    request.input('Status', sql.NVarChar(20), status);
+    const result = await request.execute('FlightReservationSystem.usp_AddFlight');
+    const row = (result.recordset && result.recordset[0]) || {};
+    return res.status(201).json(row);
+  } catch (err) {
+    const info = err?.originalError?.info;
+    console.error('Admin add flight error:', {
+      message: info?.message || err?.message,
+      number: info?.number,
+      state: info?.state,
+      class: info?.class,
+      lineNumber: info?.lineNumber,
+      procedure: info?.procName || info?.procedure,
+      code: err?.code,
+      stack: err?.stack,
+      preceding: err?.precedingErrors?.map((e) => e?.message),
+    });
+    return res.status(500).json({ message: 'Failed to add flight' });
+  }
+});
 app.post('/api/aircrafts', async (req, res) => {
   try {
     const airlineIdRaw = req.body?.airlineId;

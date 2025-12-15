@@ -15,7 +15,8 @@ class AircraftService {
         final res = await http.get(url);
         if (res.statusCode == 200) {
           final data = json.decode(res.body) as List<dynamic>;
-          return data.map((e) => Aircraft.fromJson(e as Map<String, dynamic>)).toList();
+          final list = data.map((e) => Aircraft.fromJson(e as Map<String, dynamic>)).toList();
+          return list.where((a) => a.status == 'Active').toList();
         } else {
           last = Exception('HTTP ${res.statusCode}: ${res.body}');
         }
@@ -24,5 +25,32 @@ class AircraftService {
       }
     }
     throw last ?? Exception('Failed to fetch aircrafts.');
+  }
+
+  static Future<Aircraft> softDeleteAircraft(int aircraftId) async {
+    Exception? last;
+    for (final base in _candidates) {
+      try {
+        final url = Uri.parse('${base.toString()}/$aircraftId/soft-delete');
+        final res = await http.patch(url);
+        if (res.statusCode == 200) {
+          final body = json.decode(res.body) as Map<String, dynamic>;
+          return Aircraft.fromJson(body);
+        } else {
+          String msg = 'Sunucu hatası. Daha sonra tekrar deneyin.';
+          try {
+            final body = json.decode(res.body) as Map<String, dynamic>;
+            msg = (body['message'] as String?) ?? msg;
+          } catch (_) {}
+          if (res.statusCode == 400) {
+            throw Exception(msg);
+          }
+          throw Exception('Sunucu hatası. Daha sonra tekrar deneyin.');
+        }
+      } catch (e) {
+        last = Exception(e.toString());
+      }
+    }
+    throw last ?? Exception('Sunucu hatası. Daha sonra tekrar deneyin.');
   }
 }

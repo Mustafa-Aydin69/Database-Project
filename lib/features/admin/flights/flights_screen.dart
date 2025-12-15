@@ -1,8 +1,27 @@
 import 'package:flutter/material.dart';
-
+import 'dart:convert';
 import 'dart:math';
-
-import 'package:intl/intl.dart'; // Tarih formatı için
+import 'package:http/http.dart' as http;
+import 'package:intl/intl.dart';
+class AirlineItem {
+  final int id;
+  final String name;
+  AirlineItem({required this.id, required this.name});
+}
+class AirportItem {
+  final int id;
+  final String name;
+  final String city;
+  final String country;
+  final String iata;
+  AirportItem({required this.id, required this.name, required this.city, required this.country, required this.iata});
+}
+class AircraftItem {
+  final int id;
+  final String model;
+  final int capacity;
+  AircraftItem({required this.id, required this.model, required this.capacity});
+}
 
 class FlightsScreen extends StatefulWidget {
   const FlightsScreen({super.key});
@@ -12,6 +31,13 @@ class FlightsScreen extends StatefulWidget {
 }
 
 class _FlightsScreenState extends State<FlightsScreen> {
+  @override
+  void initState() {
+    super.initState();
+    _fetchAirlinesAdmin();
+    _fetchAirportsAdmin();
+    _fetchFlights();
+  }
   @override
   void dispose() {
     _departureDateController.dispose();
@@ -60,15 +86,7 @@ class _FlightsScreenState extends State<FlightsScreen> {
 
   // --- SABİT LİSTELER ---
 
-  final List<String> _airlines = [
-    'Turkish Airlines',
-
-    'Pegasus Airlines',
-
-    'AnadoluJet',
-
-    'SunExpress',
-  ];
+  final List<String> _airlines = [];
 
   final List<String> _aircrafts = [
     'Boeing 737-800',
@@ -98,116 +116,183 @@ class _FlightsScreenState extends State<FlightsScreen> {
 
   final List<String> _statuses = [
     'Scheduled',
-
     'Delayed',
-
-    'Cancelled',
-
-    'Boarding',
-
-    'Departed',
-
-    'Arrived',
+    'Completed',
+    'Canceled',
   ];
 
   // --- MOCK VERİLER (React'ten alındı) ---
 
-  List<Map<String, dynamic>> _flights = [
-    {
-      'flightID': 1,
+  List<Map<String, dynamic>> _flights = [];
 
-      'airline': 'Turkish Airlines',
+  final List<AirlineItem> _airlineItems = [];
+  final List<AirportItem> _airportItems = [];
+  List<AircraftItem> _aircraftItems = [];
+  int? _selectedAirlineId;
+  int? _selectedAircraftId;
+  int? _selectedDepAirportId;
+  int? _selectedArrAirportId;
+  String? _aircraftWarning;
 
-      'aircraft': 'Boeing 737-800',
+  Future<void> _fetchAirlinesAdmin() async {
+    Exception? last;
+    final candidates = [
+      Uri.parse('http://10.0.2.2:3000/api/admin/airlines'),
+      Uri.parse('http://localhost:3000/api/admin/airlines'),
+    ];
+    for (final url in candidates) {
+      try {
+        final res = await http.get(url);
+        if (res.statusCode == 200) {
+          final data = json.decode(res.body) as List<dynamic>;
+          setState(() {
+            _airlineItems
+              ..clear()
+              ..addAll(data.map((e) {
+                final m = e as Map<String, dynamic>;
+                return AirlineItem(id: (m['airlineId'] as num).toInt(), name: (m['name'] as String?) ?? '');
+              }));
+            _airlines
+              ..clear()
+              ..addAll(_airlineItems.map((a) => a.name));
+          });
+          return;
+        } else {
+          last = Exception('HTTP ${res.statusCode}: ${res.body}');
+        }
+      } catch (e) {
+        last = Exception('Network error: $e');
+      }
+    }
+    if (last != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(last.toString())));
+    }
+  }
+  Future<void> _fetchAirportsAdmin() async {
+    Exception? last;
+    final candidates = [
+      Uri.parse('http://10.0.2.2:3000/api/admin/airports'),
+      Uri.parse('http://localhost:3000/api/admin/airports'),
+    ];
+    for (final url in candidates) {
+      try {
+        final res = await http.get(url);
+        print('Airports STATUS: ${res.statusCode}');
+        print('Airports BODY: ${res.body}');
+        if (res.statusCode == 200) {
+          final decoded = json.decode(res.body);
+          final List<dynamic> dataList = decoded is List
+              ? decoded
+              : (decoded is Map<String, dynamic> && decoded['data'] is List
+                  ? decoded['data'] as List<dynamic>
+                  : <dynamic>[]);
+          final seen = <int>{};
+          final items = <AirportItem>[];
+          for (final e in dataList) {
+            if (e is! Map<String, dynamic>) continue;
+            try {
+              final id = parseRequiredInt(e, ['airportId', 'AirportID']);
+              if (seen.contains(id)) continue;
+              seen.add(id);
+              final name = parseString(e, ['name', 'Name']);
+              final city = parseString(e, ['city', 'City']);
+              final country = parseString(e, ['country', 'Country']);
+              final iata = parseString(e, ['iataCode', 'IATA_Code', 'IATA']);
+              items.add(AirportItem(id: id, name: name, city: city, country: country, iata: iata));
+            } catch (err) {
+              print('Airport parse error: $err');
+              continue;
+            }
+          }
+          setState(() {
+            _airportItems
+              ..clear()
+              ..addAll(items);
+            _airports
+              ..clear()
+              ..addAll(_airportItems.map((p) => '${p.iata} - ${p.name}'));
+          });
+          return;
+        } else {
+          last = Exception('HTTP ${res.statusCode}: ${res.body}');
+        }
+      } catch (e) {
+        last = Exception('Network error: $e');
+      }
+    }
+    if (last != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(last.toString())));
+    }
+  }
+  Future<void> _fetchAircraftsByAirline(int airlineId) async {
+    Exception? last;
+    final candidates = [
+      Uri.parse('http://10.0.2.2:3000/api/admin/aircrafts?airlineId=$airlineId'),
+      Uri.parse('http://localhost:3000/api/admin/aircrafts?airlineId=$airlineId'),
+    ];
+    for (final url in candidates) {
+      try {
+        final res = await http.get(url);
+        if (res.statusCode == 200) {
+          final data = json.decode(res.body) as List<dynamic>;
+          setState(() {
+            _aircraftItems = data.map((e) {
+              final m = e as Map<String, dynamic>;
+              return AircraftItem(
+                id: (m['aircraftId'] as num).toInt(),
+                model: (m['model'] as String?) ?? '',
+                capacity: (m['capacity'] as num?)?.toInt() ?? 0,
+              );
+            }).toList();
+          });
+          return;
+        } else {
+          last = Exception('HTTP ${res.statusCode}: ${res.body}');
+        }
+      } catch (e) {
+        last = Exception('Network error: $e');
+      }
+    }
+    if (last != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(last.toString())));
+    }
+  }
+  String _normalizeStatus(String s) {
+    final t = s.toLowerCase().trim();
+    if (t == 'cancelled' || t == 'canceled') return 'Canceled';
+    if (t == 'scheduled') return 'Scheduled';
+    if (t == 'delayed') return 'Delayed';
+    if (t == 'completed') return 'Completed';
+    return s;
+  }
 
-      'departureAirport': 'IST - İstanbul Havalimanı',
 
-      'arrivalAirport': 'AYT - Antalya Havalimanı',
-
-      'departureTime': '2024-01-15T10:30',
-
-      'arrivalTime': '2024-01-15T12:00',
-
-      'status': 'Scheduled',
-    },
-
-    {
-      'flightID': 2,
-
-      'airline': 'Pegasus Airlines',
-
-      'aircraft': 'Airbus A320',
-
-      'departureAirport': 'SAW - Sabiha Gökçen',
-
-      'arrivalAirport': 'ADB - İzmir Adnan Menderes',
-
-      'departureTime': '2024-01-15T14:00',
-
-      'arrivalTime': '2024-01-15T15:15',
-
-      'status': 'Delayed',
-    },
-
-    {
-      'flightID': 3,
-
-      'airline': 'Turkish Airlines',
-
-      'aircraft': 'Boeing 777-300ER',
-
-      'departureAirport': 'IST - İstanbul Havalimanı',
-
-      'arrivalAirport': 'JFK - New York JFK',
-
-      'departureTime': '2024-01-15T23:45',
-
-      'arrivalTime': '2024-01-16T05:30',
-
-      'status': 'Scheduled',
-    },
-
-    {
-      'flightID': 4,
-
-      'airline': 'AnadoluJet',
-
-      'aircraft': 'Boeing 737-800',
-
-      'departureAirport': 'ESB - Esenboğa',
-
-      'arrivalAirport': 'TZX - Trabzon',
-
-      'departureTime': '2024-01-15T08:00',
-
-      'arrivalTime': '2024-01-15T09:45',
-
-      'status': 'Cancelled',
-    },
-
-    // Sayfalama için veri üretelim
-    ...List.generate(
-      15,
-
-      (index) => {
-        'flightID': 5 + index,
-
-        'airline': index % 2 == 0 ? 'Turkish Airlines' : 'Pegasus Airlines',
-
-        'aircraft': 'Airbus A320',
-
-        'departureAirport': 'IST - İstanbul Havalimanı',
-
-        'arrivalAirport': 'ESB - Esenboğa',
-
-        'departureTime': '2024-01-${16 + index}T10:00',
-
-        'arrivalTime': '2024-01-${16 + index}T11:30',
-
-        'status': 'Scheduled',
-      },
-    ),
-  ];
+  Future<void> _fetchFlights() async {
+    Exception? last;
+    final candidates = [
+      Uri.parse('http://10.0.2.2:3000/api/admin/flights'),
+      Uri.parse('http://localhost:3000/api/admin/flights'),
+    ];
+    for (final url in candidates) {
+      try {
+        final res = await http.get(url);
+        if (res.statusCode == 200) {
+          final data = json.decode(res.body) as List<dynamic>;
+          setState(() {
+            _flights = data.map((e) => e as Map<String, dynamic>).toList();
+          });
+          return;
+        } else {
+          last = Exception('HTTP ${res.statusCode}: ${res.body}');
+        }
+      } catch (e) {
+        last = Exception('Network error: $e');
+      }
+    }
+    if (last != null) {
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(last.toString())));
+    }
+  }
 
   // --- FİLTRELEME ---
 
@@ -235,6 +320,38 @@ class _FlightsScreenState extends State<FlightsScreen> {
   }
 
   // --- CRUD İŞLEMLERİ ---
+
+  int parseRequiredInt(Map<String, dynamic> j, List<String> keys) {
+    for (final k in keys) {
+      final v = j[k];
+      if (v != null) {
+        final s = v.toString();
+        final n = int.tryParse(s);
+        if (n != null) return n;
+      }
+    }
+    throw FormatException("Missing required int: ${keys.join(',')}");
+  }
+
+  int? parseOptionalInt(Map<String, dynamic> j, List<String> keys) {
+    for (final k in keys) {
+      final v = j[k];
+      if (v != null) {
+        final s = v.toString();
+        final n = int.tryParse(s);
+        if (n != null) return n;
+      }
+    }
+    return null;
+  }
+
+  String parseString(Map<String, dynamic> j, List<String> keys) {
+    for (final k in keys) {
+      final v = j[k];
+      if (v != null) return v.toString();
+    }
+    return '';
+  }
 
   Future<void> _selectDateTime(BuildContext context, bool isDeparture) async {
     final DateTime? pickedDate = await showDatePicker(
@@ -272,13 +389,13 @@ class _FlightsScreenState extends State<FlightsScreen> {
             _departureDate = dt;
 
             _departureDateController.text = DateFormat(
-              'dd.MM.yyyy HH:mm',
+              'yyyy-MM-dd HH:mm',
             ).format(dt);
           } else {
             _arrivalDate = dt;
 
             _arrivalDateController.text = DateFormat(
-              'dd.MM.yyyy HH:mm',
+              'yyyy-MM-dd HH:mm',
             ).format(dt);
           }
         });
@@ -288,393 +405,34 @@ class _FlightsScreenState extends State<FlightsScreen> {
 
   
 
-  void _showFlightDialog({Map<String, dynamic>? flight}) {
-    final bool isEdit = flight != null;
-    if (flight != null) {
-      _selectedAirline = flight['airline'];
-
-      _selectedAircraft = flight['aircraft'];
-
-      _selectedDepAirport = flight['departureAirport'];
-
-      _selectedArrAirport = flight['arrivalAirport'];
-
-      _departureDate = DateTime.parse(flight['departureTime']);
-
-      _arrivalDate = DateTime.parse(flight['arrivalTime']);
-
-      _selectedStatus = flight['status'];
-
-      _departureDateController.text = DateFormat(
-        'dd.MM.yyyy HH:mm',
-      ).format(_departureDate!);
-
-      _arrivalDateController.text = DateFormat(
-        'dd.MM.yyyy HH:mm',
-      ).format(_arrivalDate!);
-    } else {
-      _selectedAirline = null;
-
-      _selectedAircraft = null;
-
-      _selectedDepAirport = null;
-
-      _selectedArrAirport = null;
-
-      _departureDate = null;
-
-      _arrivalDate = null;
-
-      _selectedStatus = 'Scheduled';
-
-      _departureDateController.clear();
-
-      _arrivalDateController.clear();
-    }
-
-    showDialog(
+  Future<void> pickDateTime({
+    required BuildContext context,
+    required TextEditingController controller,
+  }) async {
+    final date = await showDatePicker(
       context: context,
-
-      builder: (dialogContext) => StatefulBuilder(
-        builder: (context, setDialogState) {
-          return AlertDialog(
-            title: Text(flight != null ? 'Uçuş Düzenle' : 'Yeni Uçuş'),
-
-            content: SizedBox(
-              width: 600, // Geniş modal
-
-              child: SingleChildScrollView(
-                child: Form(
-                  key: _formKey,
-
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-
-                    children: [
-                      Row(
-                        children: [
-                          Expanded(
-                            child: DropdownButtonFormField<String>(
-                              value: _selectedAirline,
-
-                              decoration: const InputDecoration(
-                                labelText: "Havayolu",
-
-                                border: OutlineInputBorder(),
-                              ),
-
-                              items: _airlines
-                                  .map(
-                                    (a) => DropdownMenuItem(
-                                      value: a,
-
-                                      child: Text(a),
-                                    ),
-                                  )
-                                  .toList(),
-
-                              onChanged: isEdit
-                                  ? null
-                                  : (val) => setDialogState(
-                                      () => _selectedAirline = val,
-                                    ),
-
-                              validator: (v) => v == null ? "Seçiniz" : null,
-                            ),
-                          ),
-
-                          const SizedBox(width: 16),
-
-                          Expanded(
-                            child: DropdownButtonFormField<String>(
-                              value: _selectedAircraft,
-
-                              decoration: const InputDecoration(
-                                labelText: "Uçak",
-
-                                border: OutlineInputBorder(),
-                              ),
-
-                              items: _aircrafts
-                                  .map(
-                                    (a) => DropdownMenuItem(
-                                      value: a,
-
-                                      child: Text(a),
-                                    ),
-                                  )
-                                  .toList(),
-
-                              onChanged: isEdit
-                                  ? null
-                                  : (val) => setDialogState(
-                                      () => _selectedAircraft = val,
-                                    ),
-
-                              validator: (v) => v == null ? "Seçiniz" : null,
-                            ),
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      Row(
-                        children: [
-                          Expanded(
-                            child: DropdownButtonFormField<String>(
-                              value: _selectedDepAirport,
-
-                              decoration: const InputDecoration(
-                                labelText: "Kalkış Havalimanı",
-
-                                border: OutlineInputBorder(),
-                              ),
-
-                              items: _airports
-                                  .map(
-                                    (a) => DropdownMenuItem(
-                                      value: a,
-
-                                      child: Text(
-                                        a,
-
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                  )
-                                  .toList(),
-
-                              onChanged: isEdit
-                                  ? null
-                                  : (val) => setDialogState(
-                                      () => _selectedDepAirport = val,
-                                    ),
-
-                              validator: (v) => v == null ? "Seçiniz" : null,
-
-                              isExpanded: true,
-                            ),
-                          ),
-
-                          const SizedBox(width: 16),
-
-                          Expanded(
-                            child: DropdownButtonFormField<String>(
-                              value: _selectedArrAirport,
-
-                              decoration: const InputDecoration(
-                                labelText: "Varış Havalimanı",
-
-                                border: OutlineInputBorder(),
-                              ),
-
-                              items: _airports
-                                  .map(
-                                    (a) => DropdownMenuItem(
-                                      value: a,
-
-                                      child: Text(
-                                        a,
-
-                                        overflow: TextOverflow.ellipsis,
-                                      ),
-                                    ),
-                                  )
-                                  .toList(),
-
-                              onChanged: isEdit
-                                  ? null
-                                  : (val) => setDialogState(
-                                      () => _selectedDepAirport = val,
-                                    ),
-
-                              validator: (v) => v == null ? "Seçiniz" : null,
-
-                              isExpanded: true,
-                            ),
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      Row(
-                        children: [
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: () async {
-                                FocusScope.of(context).unfocus();
-
-                                await _selectDateTime(context, true);
-
-                                setDialogState(() {});
-                              },
-
-                              child: AbsorbPointer(
-                                child: TextFormField(
-                                  readOnly: true,
-
-                                  decoration: const InputDecoration(
-                                    labelText: "Kalkış Zamanı",
-
-                                    border: OutlineInputBorder(),
-
-                                    suffixIcon: Icon(Icons.calendar_today),
-                                  ),
-
-                                  controller: _departureDateController,
-
-                                  validator: (v) => _departureDate == null
-                                      ? "Kalkış zamanı seçiniz"
-                                      : null,
-                                ),
-                              ),
-                            ),
-                          ),
-
-                          const SizedBox(width: 16),
-
-                          Expanded(
-                            child: GestureDetector(
-                              onTap: () async {
-                                FocusScope.of(context).unfocus();
-
-                                await _selectDateTime(context, false);
-
-                                setDialogState(() {});
-                              },
-
-                              child: AbsorbPointer(
-                                child: TextFormField(
-                                  readOnly: true,
-
-                                  decoration: const InputDecoration(
-                                    labelText: "Varış Zamanı",
-
-                                    border: OutlineInputBorder(),
-
-                                    suffixIcon: Icon(Icons.calendar_today),
-                                  ),
-
-                                  controller: _arrivalDateController,
-
-                                  validator: (v) => _arrivalDate == null
-                                      ? "Varış zamanı seçiniz"
-                                      : null,
-                                ),
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-
-                      const SizedBox(height: 16),
-
-                      DropdownButtonFormField<String>(
-                        value: _selectedStatus,
-
-                        decoration: const InputDecoration(
-                          labelText: "Durum",
-
-                          border: OutlineInputBorder(),
-                        ),
-
-                        items: _statuses
-                            .map(
-                              (s) => DropdownMenuItem(value: s, child: Text(s)),
-                            )
-                            .toList(),
-
-                        onChanged: (val) =>
-                            setDialogState(() => _selectedStatus = val!),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-            ), // content kapanışı
-
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-
-                child: const Text("İptal"),
-              ),
-
-              ElevatedButton(
-                style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.teal,
-
-                  foregroundColor: Colors.white,
-                ),
-
-                onPressed: () {
-                  if (_formKey.currentState!.validate() &&
-                      _departureDate != null &&
-                      _arrivalDate != null) {
-                    setState(() {
-                      if (flight != null) {
-                        final index = _flights.indexWhere(
-                          (f) => f['flightID'] == flight['flightID'],
-                        );
-
-                        _flights[index] = {
-                          'flightID': flight['flightID'],
-
-                          'airline': _selectedAirline,
-
-                          'aircraft': _selectedAircraft,
-
-                          'departureAirport': _selectedDepAirport,
-
-                          'arrivalAirport': _selectedArrAirport,
-
-                          'departureTime': _departureDate!.toIso8601String(),
-
-                          'arrivalTime': _arrivalDate!.toIso8601String(),
-
-                          'status': _selectedStatus,
-                        };
-                      } else {
-                        _flights.insert(0, {
-                          'flightID': DateTime.now().millisecondsSinceEpoch,
-
-                          'airline': _selectedAirline,
-
-                          'aircraft': _selectedAircraft,
-
-                          'departureAirport': _selectedDepAirport,
-
-                          'arrivalAirport': _selectedArrAirport,
-
-                          'departureTime': _departureDate!.toIso8601String(),
-
-                          'arrivalTime': _arrivalDate!.toIso8601String(),
-
-                          'status': _selectedStatus,
-                        });
-                      }
-                    });
-
-                    Navigator.pop(context);
-                  }
-                },
-
-                child: Text(flight != null ? "Güncelle" : "Ekle"),
-              ),
-            ],
-          );
-        },
-      ),
+      initialDate: DateTime.now(),
+      firstDate: DateTime(2020),
+      lastDate: DateTime(2035),
     );
-  }
-
-  void _deleteFlight(int id) {
+    if (date == null) return;
+    final time = await showTimePicker(
+      context: context,
+      initialTime: TimeOfDay.fromDateTime(DateTime.now()),
+    );
+    if (time == null) return;
+    final dt = DateTime(date.year, date.month, date.day, time.hour, time.minute);
     setState(() {
-      _flights.removeWhere((f) => f['flightID'] == id);
+      controller.text = DateFormat('yyyy-MM-dd HH:mm').format(dt);
+      if (identical(controller, _departureDateController)) {
+        _departureDate = dt;
+      } else if (identical(controller, _arrivalDateController)) {
+        _arrivalDate = dt;
+      }
     });
   }
+
+  
 
   @override
   Widget build(BuildContext context) {
@@ -734,25 +492,7 @@ class _FlightsScreenState extends State<FlightsScreen> {
                   ],
                 ),
 
-                ElevatedButton.icon(
-                  onPressed: () => _showFlightDialog(),
-
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.teal,
-
-                    foregroundColor: Colors.white,
-
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 20,
-
-                      vertical: 12,
-                    ),
-                  ),
-
-                  icon: const Icon(Icons.add),
-
-                  label: const Text("Yeni Uçuş"),
-                ),
+                
               ],
             ),
 
@@ -805,7 +545,7 @@ class _FlightsScreenState extends State<FlightsScreen> {
                       SizedBox(
                         width: isMobile ? double.infinity : 200,
 
-                        child: DropdownButtonFormField<String>(
+                        child: DropdownButtonFormField<String?>(
                           value: _filterAirline.isEmpty ? null : _filterAirline,
 
                           decoration: const InputDecoration(
@@ -819,17 +559,15 @@ class _FlightsScreenState extends State<FlightsScreen> {
                           ),
 
                           items: [
-                            const DropdownMenuItem(
-                              value: "",
-
+                            const DropdownMenuItem<String?>(
+                              value: null,
                               child: Text("Tüm Havayolları"),
                             ),
-
                             ..._airlines.map(
-                              (a) => DropdownMenuItem(value: a, child: Text(a)),
+                              (a) => DropdownMenuItem<String?>(value: a, child: Text(a)),
                             ),
                           ],
-
+ 
                           onChanged: (val) =>
                               setState(() => _filterAirline = val ?? ""),
                         ),
@@ -859,18 +597,17 @@ class _FlightsScreenState extends State<FlightsScreen> {
 
                           items: [
                             const DropdownMenuItem(
-                              value: "",
-
+                              value: "All",
                               child: Text("Tüm Durumlar"),
                             ),
-
                             ..._statuses.map(
                               (s) => DropdownMenuItem(value: s, child: Text(s)),
                             ),
                           ],
-
-                          onChanged: (val) =>
-                              setState(() => _filterStatus = val ?? ""),
+ 
+                          onChanged: (val) => setState(() {
+                            _filterStatus = (val == null || val == 'All') ? "" : val;
+                          }),
                         ),
                       ),
                     ],
@@ -917,12 +654,6 @@ class _FlightsScreenState extends State<FlightsScreen> {
                     itemBuilder: (context, index) {
                       return _FlightCard(
                         flight: currentData[index],
-
-                        onEdit: () =>
-                            _showFlightDialog(flight: currentData[index]),
-
-                        onDelete: () =>
-                            _deleteFlight(currentData[index]['flightID']),
                       );
                     },
                   );
@@ -967,16 +698,8 @@ class _FlightsScreenState extends State<FlightsScreen> {
 class _FlightCard extends StatelessWidget {
   final Map<String, dynamic> flight;
 
-  final VoidCallback onEdit;
-
-  final VoidCallback onDelete;
-
   const _FlightCard({
     required this.flight,
-
-    required this.onEdit,
-
-    required this.onDelete,
   });
 
   Color _getStatusColor(String status) {
@@ -987,17 +710,17 @@ class _FlightCard extends StatelessWidget {
       case 'Delayed':
         return Colors.orange;
 
-      case 'Cancelled':
+      case 'Canceled':
         return Colors.red;
+
+      case 'Completed':
+        return Colors.green;
 
       case 'Boarding':
         return Colors.purple;
 
       case 'Departed':
         return Colors.teal;
-
-      case 'Arrived':
-        return Colors.green;
 
       default:
         return Colors.grey;
@@ -1174,33 +897,7 @@ class _FlightCard extends StatelessWidget {
             ],
           ),
 
-          const SizedBox(height: 8),
-
-          Wrap(
-            alignment: WrapAlignment.end,
-
-            spacing: 12,
-
-            children: [
-              InkWell(
-                onTap: onEdit,
-
-                child: const Icon(Icons.edit, size: 18, color: Colors.teal),
-              ),
-
-              InkWell(
-                onTap: onDelete,
-
-                child: const Icon(
-                  Icons.delete_outline,
-
-                  size: 18,
-
-                  color: Colors.red,
-                ),
-              ),
-            ],
-          ),
+          
         ],
       ),
     );

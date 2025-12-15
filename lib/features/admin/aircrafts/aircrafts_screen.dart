@@ -138,6 +138,7 @@ class _AircraftsScreenState extends State<AircraftsScreen> {
                         airlineId: _selectedAirlineId,
                         model: _modelController.text,
                         capacity: int.parse(_capacityController.text),
+                        status: 'Active',
                       );
                     }
                   } else {
@@ -148,6 +149,7 @@ class _AircraftsScreenState extends State<AircraftsScreen> {
                         airlineId: _selectedAirlineId,
                         model: _modelController.text,
                         capacity: int.parse(_capacityController.text),
+                        status: 'Active',
                       ),
                     );
                   }
@@ -167,21 +169,40 @@ class _AircraftsScreenState extends State<AircraftsScreen> {
   void _deleteAircraft(int id) {
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Emin misiniz?"),
-        content: const Text("Bu uçağı silmek istediğinizden emin misiniz?"),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
-          TextButton(
-            onPressed: () {
-              setState(() {
-                _items.removeWhere((a) => a.aircraftId == id);
-              });
-              Navigator.pop(context);
-            },
-            child: const Text("Sil", style: TextStyle(color: Colors.red)),
-          ),
-        ],
+      barrierDismissible: false,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          bool deleting = false;
+          return AlertDialog(
+            title: const Text("Uçak pasife alınsın mı?"),
+            content: const Text("Bu uçak silinmeyecek, sadece pasife alınacak ve listeden kaldırılacak. Devam edilsin mi?"),
+            actions: [
+              TextButton(onPressed: deleting ? null : () => Navigator.pop(context), child: const Text("İptal")),
+              TextButton(
+                onPressed: deleting
+                    ? null
+                    : () async {
+                        setDialogState(() => deleting = true);
+                        try {
+                          final updated = await AircraftService.softDeleteAircraft(id);
+                          setState(() {
+                            _items.removeWhere((a) => a.aircraftId == id);
+                          });
+                          Navigator.pop(context);
+                          ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Uçak pasife alındı ve listeden kaldırıldı.')));
+                        } catch (e) {
+                          setDialogState(() => deleting = false);
+                          final msg = e.toString().replaceFirst('Exception: ', '');
+                          ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(msg.isEmpty ? 'Sunucu hatası. Daha sonra tekrar deneyin.' : msg)));
+                        }
+                      },
+                child: deleting
+                    ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2))
+                    : const Text("Sil", style: TextStyle(color: Colors.red)),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -214,7 +235,7 @@ class _AircraftsScreenState extends State<AircraftsScreen> {
           final data = snapshot.data ?? [];
           if (_items.isEmpty && data.isNotEmpty) {
             WidgetsBinding.instance.addPostFrameCallback((_) {
-              if (mounted) setState(() => _items = data);
+              if (mounted) setState(() => _items = data.where((a) => a.status == 'Active').toList());
             });
           }
           return Padding(
