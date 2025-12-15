@@ -14,6 +14,14 @@ const PORT = process.env.PORT || 3000;
 app.use(cors({ origin: true, credentials: true }));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+app.use((req, res, next) => {
+  const start = Date.now();
+  res.on('finish', () => {
+    const duration = Date.now() - start;
+    console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl} -> ${res.statusCode} ${duration}ms`);
+  });
+  next();
+});
 
 // Routes
 app.use('/api', authRoutes);
@@ -165,6 +173,90 @@ console.log('- PUT  /api/flight-classes/:classId');
   }
 })();
 
+// Aircrafts endpoint
+app.get('/api/aircrafts', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const result = await pool.request().execute('FlightReservationSystem.usp_GetAircrafts');
+    const rows = (result.recordset || []).map((row) => ({
+      aircraftId: parseInt(row.AircraftID ?? row.aircraftId ?? 0) || 0,
+      airlineId: row.AirlineID === null || row.AirlineID === undefined ? null : parseInt(row.AirlineID ?? row.airlineId),
+      model: row.Model ?? row.model ?? '',
+      capacity: parseInt(row.Capacity ?? row.capacity ?? 0) || 0,
+    }));
+    return res.status(200).json(rows);
+  } catch (err) {
+    console.error('Aircrafts fetch error:', err);
+    return res.status(500).json({ message: 'Failed to fetch aircrafts' });
+  }
+});
+
+app.get('/api/airlines', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const result = await pool.request().execute('FlightReservationSystem.usp_GetAirlines');
+    const rows = (result.recordset || []).map((row) => ({
+      airlineId: parseInt(row.AirlineID ?? row.airlineId ?? 0) || 0,
+      airlineName: row.AirlineName ?? row.Name ?? row.airlineName ?? '',
+    }));
+    return res.status(200).json(rows);
+  } catch (err) {
+    console.error('Airlines fetch error:', err);
+    return res.status(500).json({ message: 'Failed to fetch airlines' });
+  }
+});
+
+app.post('/api/aircrafts', async (req, res) => {
+  try {
+    const airlineIdRaw = req.body?.airlineId;
+    const model = (req.body?.model ?? '').toString().trim();
+    const capacityRaw = req.body?.capacity;
+    const airlineId = airlineIdRaw === null || airlineIdRaw === undefined ? null : parseInt(airlineIdRaw);
+    const capacity = parseInt(capacityRaw);
+    if (!model) {
+      return res.status(400).json({ message: 'Model cannot be empty' });
+    }
+    if (!Number.isFinite(capacity) || capacity <= 0) {
+      return res.status(400).json({ message: 'Capacity must be greater than 0' });
+    }
+    const pool = await getPool();
+    const request = pool.request();
+    if (airlineId !== null && airlineId !== undefined) {
+      request.input('AirlineID', sql.Int, airlineId);
+    } else {
+      request.input('AirlineID', sql.Int, null);
+    }
+    request.input('Model', sql.NVarChar(100), model);
+    request.input('Capacity', sql.Int, capacity);
+    const result = await request.execute('FlightReservationSystem.usp_AddAircraft');
+    const row = (result.recordset && result.recordset[0]) || {};
+    const data = {
+      aircraftId: parseInt(row.AircraftID ?? row.aircraftId ?? 0) || 0,
+      airlineId: row.AirlineID === null || row.AirlineID === undefined ? null : parseInt(row.AirlineID ?? row.airlineId),
+      model: row.Model ?? model,
+      capacity: parseInt(row.Capacity ?? capacity) || capacity,
+    };
+    return res.status(200).json(data);
+  } catch (err) {
+    console.error('POST /api/aircrafts error:', err);
+    const info = err?.originalError?.info;
+    const msg =
+      info?.message ||
+      (err?.precedingErrors && err.precedingErrors[0]?.message) ||
+      err?.message ||
+      'Failed to create aircraft';
+    if (/invalid airline|AirlineID/i.test(msg)) {
+      return res.status(400).json({ message: msg });
+    }
+    if (/model cannot be empty|capacity/i.test(msg)) {
+      return res.status(400).json({ message: msg });
+    }
+    if (/duplicate|already exists|AirlineID.*Model/i.test(msg)) {
+      return res.status(500).json({ message: 'Failed to create aircraft' });
+    }
+    return res.status(500).json({ message: 'Failed to create aircraft' });
+  }
+});
 app.delete('/api/flight-classes/:classId', async (req, res) => {
   try {
     const idRaw = req.params.classId;
