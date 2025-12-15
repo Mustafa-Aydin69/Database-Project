@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
 import '../../../../core/services/admin_service.dart';
+import '../../../../core/services/auth_service.dart';
 
 class VehicleTypesScreen extends StatefulWidget {
   const VehicleTypesScreen({super.key});
@@ -63,7 +64,7 @@ class _VehicleTypesScreenState extends State<VehicleTypesScreen> {
     final bool isEditing = type != null;
 
     if (isEditing) {
-      final vehicleType = type!; // isEditing true ise type null değil
+                  final vehicleType = type; // isEditing true ise type null değil
       _typeNameController.text = vehicleType.typeName ?? '';
       _multiplierController.text = vehicleType.priceMultiplier?.toString() ?? '1.0';
     } else {
@@ -132,19 +133,98 @@ class _VehicleTypesScreenState extends State<VehicleTypesScreen> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.teal, foregroundColor: Colors.white),
-            onPressed: () {
+            onPressed: () async {
               if (_formKey.currentState!.validate()) {
-                // TODO: Güncelleme/Ekleme işlemleri backend'e eklendiğinde burada yapılacak
-                // Şimdilik sadece dialog'u kapatıyoruz
-                Navigator.pop(context);
-                ScaffoldMessenger.of(context).showSnackBar(
-                  SnackBar(
-                    content: Text(isEditing 
-                        ? "Araç tipi güncelleme işlemi yakında aktif olacak" 
-                        : "Yeni araç tipi ekleme işlemi yakında aktif olacak"),
-                    backgroundColor: Colors.orange,
-                  ),
-                );
+                if (isEditing) {
+                  // Güncelleme işlemi
+                  final userId = AuthService().currentUserId;
+                  if (userId == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("Kullanıcı kimliği bulunamadı. Lütfen tekrar giriş yapın."),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                    return;
+                  }
+
+                  final vehicleType = type; // isEditing true ise type null değil
+                  final priceMultiplier = double.tryParse(_multiplierController.text.trim());
+                  
+                  if (priceMultiplier == null || priceMultiplier <= 0) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("Geçerli bir fiyat çarpanı giriniz (0'dan büyük olmalı)"),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                    return;
+                  }
+
+                  // Loading dialog göster
+                  if (mounted) {
+                    showDialog(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (loadingContext) => const Center(child: CircularProgressIndicator()),
+                    );
+                  }
+
+                  try {
+                    final success = await _adminService.updateVehicleType(
+                      typeId: vehicleType.typeId!,
+                      priceMultiplier: priceMultiplier,
+                      userId: userId,
+                    );
+
+                    // Loading dialog'u kapat
+                    if (mounted) {
+                      Navigator.of(context, rootNavigator: true).pop();
+                    }
+
+                    if (success) {
+                      // Dialog'u kapat
+                      Navigator.pop(context);
+                      // Başarılı mesajı göster
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text("Araç tipi başarıyla güncellendi"),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
+                      // Listeyi yenile
+                      _loadVehicleTypes();
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text("Araç tipi güncellenirken bir hata oluştu"),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                  } catch (e) {
+                    // Loading dialog'u kapat
+                    if (mounted) {
+                      Navigator.of(context, rootNavigator: true).pop();
+                    }
+                    
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text("Hata: ${e.toString()}"),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                } else {
+                  // TODO: Ekleme işlemi (henüz implement edilmedi)
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Yeni araç tipi ekleme işlemi yakında aktif olacak"),
+                      backgroundColor: Colors.orange,
+                    ),
+                  );
+                }
               }
             },
             child: Text(isEditing ? "Güncelle" : "Ekle"),
@@ -180,28 +260,12 @@ class _VehicleTypesScreenState extends State<VehicleTypesScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // --- HEADER ---
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text("Araç Tipleri", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black87)),
-                    SizedBox(height: 4),
-                    Text("Araç sınıflarını ve fiyat çarpanlarını yönetin", style: TextStyle(color: Colors.grey)),
-                  ],
-                ),
-                ElevatedButton.icon(
-                  onPressed: () => _showTypeDialog(),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.teal,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
-                  icon: const Icon(Icons.add),
-                  label: const Text("Yeni Araç Tipi"),
-                ),
+                Text("Araç Tipleri", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black87)),
+                SizedBox(height: 4),
+                Text("Araç sınıflarını ve fiyat çarpanlarını yönetin", style: TextStyle(color: Colors.grey)),
               ],
             ),
 

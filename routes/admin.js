@@ -1881,6 +1881,1076 @@ router.get('/vehicle-types', async (req, res) => {
   }
 });
 
+/**
+ * PUT /api/admin/update-vehicle-type
+ * Araç tipinin fiyat çarpanını günceller
+ * AirportParkingSystem.UpdateVehicleType stored procedure'ünü çağırır
+ * TypeName değiştirilemez, sadece PriceMultiplier güncellenir
+ */
+router.put('/update-vehicle-type', async (req, res) => {
+  console.log('📥 PUT /api/admin/update-vehicle-type endpoint called');
+  console.log('📋 Request body:', JSON.stringify(req.body, null, 2));
+
+  try {
+    const {
+      typeId,
+      priceMultiplier,
+      userId
+    } = req.body;
+
+    // Validasyon
+    if (!typeId || !priceMultiplier || !userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Eksik parametreler: typeId, priceMultiplier ve userId zorunludur.'
+      });
+    }
+
+    // PriceMultiplier'ın geçerli bir sayı olduğunu kontrol et
+    const multiplier = parseFloat(priceMultiplier);
+    if (isNaN(multiplier) || multiplier <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Fiyat çarpanı geçerli bir pozitif sayı olmalıdır.'
+      });
+    }
+
+    const pool = await getPool();
+    const request = pool.request();
+
+    // Stored procedure parametrelerini ekle
+    request.input('TypeID', sql.Int, typeId);
+    request.input('PriceMultiplier', sql.Decimal(5, 2), multiplier);
+    request.input('UserID', sql.Int, userId);
+
+    // Stored procedure'ü çağır
+    await request.execute('AirportParkingSystem.UpdateVehicleType');
+
+    console.log(`✅ Vehicle type ${typeId} updated successfully by user ${userId}`);
+    res.json({
+      success: true,
+      message: 'Araç tipi başarıyla güncellendi'
+    });
+
+  } catch (error) {
+    console.error('❌ Update vehicle type error:', error);
+    
+    // Özel hata mesajlarını kontrol et
+    let errorMessage = 'Sunucu hatası: ' + error.message;
+    if (error.message && error.message.includes('Araç tipi bulunamadı')) {
+      errorMessage = 'Araç tipi bulunamadı.';
+    }
+
+    res.status(500).json({
+      success: false,
+      message: errorMessage
+    });
+  }
+});
+
+/**
+ * GET /api/admin/parking-lots
+ * Tüm otopark alanlarını getirir
+ * AirportParkingSystem.GetParkingLots stored procedure'ünü çağırır
+ * ERD'ye göre: Parking_ParkingLots -> Flight_Airports (JOIN ile havalimanı bilgisi)
+ */
+router.get('/parking-lots', async (req, res) => {
+  console.log('📥 GET /api/admin/parking-lots endpoint called');
+  try {
+    const pool = await getPool();
+    const request = pool.request();
+
+    // Stored procedure'ü çağır
+    const result = await request.execute('AirportParkingSystem.GetParkingLots');
+
+    console.log('🔍 Raw database result count:', result.recordset?.length || 0);
+    if (result.recordset && result.recordset.length > 0) {
+      console.log('🔍 Sample row keys:', Object.keys(result.recordset[0]));
+    }
+
+    if (!result.recordset || result.recordset.length === 0) {
+      console.log('⚠️ No parking lots found in database');
+      return res.json({
+        success: true,
+        data: []
+      });
+    }
+
+    // Kolon isimlerini normalize et (case-insensitive)
+    const getValue = (obj, ...keys) => {
+      for (const key of keys) {
+        const foundKey = Object.keys(obj).find(k => k.toLowerCase() === key.toLowerCase());
+        if (foundKey && obj[foundKey] != null) {
+          return obj[foundKey];
+        }
+      }
+      return null;
+    };
+
+    // Otopark alanı listesini map et
+    const parkingLots = result.recordset.map((row) => {
+      const parkingLotId = getValue(row, 'ParkingLotID', 'parkingLotID', 'parking_lot_id', 'ParkingLotId', 'parkingLotId', 'ID', 'Id', 'id');
+      const airportId = getValue(row, 'AirportID', 'airportID', 'airport_id', 'AirportId', 'airportId');
+      const lotName = getValue(row, 'LotName', 'lotName', 'lot_name', 'Name', 'name');
+      const capacity = getValue(row, 'Capacity', 'capacity');
+      const locationDescription = getValue(row, 'LocationDescription', 'locationDescription', 'location_description', 'Location', 'location');
+      
+      // Havalimanı bilgileri
+      const airportName = getValue(row, 'AirportName', 'airportName', 'airport_name');
+      const airportIATA = getValue(row, 'AirportIATACode', 'airportIATACode', 'airport_iata_code', 'IATA_Code', 'iata_code', 'IATA', 'iata');
+      const airportCity = getValue(row, 'AirportCity', 'airportCity', 'airport_city', 'City', 'city');
+      
+      // Doluluk bilgisi
+      const occupiedSpots = getValue(row, 'OccupiedSpots', 'occupiedSpots', 'occupied_spots') || 0;
+
+      // Havalimanı adını formatla
+      const airportDisplayName = airportIATA && airportName 
+        ? `${airportName} (${airportIATA})`
+        : airportName || 'Bilinmeyen Havalimanı';
+
+      return {
+        ParkingLotID: parkingLotId || null,
+        AirportID: airportId || null,
+        LotName: lotName || null,
+        Capacity: capacity != null ? parseInt(capacity) : null,
+        LocationDescription: locationDescription || null,
+        AirportName: airportDisplayName,
+        AirportIATACode: airportIATA || null,
+        AirportCity: airportCity || null,
+        OccupiedSpots: parseInt(occupiedSpots) || 0,
+      };
+    });
+
+    console.log('✅ Parking lots retrieved:', parkingLots.length, 'lots');
+    if (parkingLots.length > 0) {
+      console.log('📋 Sample parking lot:', JSON.stringify(parkingLots[0], null, 2));
+    }
+
+    res.json({
+      success: true,
+      data: parkingLots
+    });
+
+  } catch (error) {
+    console.error('❌ Admin parking-lots error:', error);
+    console.error('❌ Error stack:', error.stack);
+    res.status(500).json({
+      success: false,
+      message: 'Sunucu hatası: ' + error.message,
+      data: []
+    });
+  }
+});
+
+/**
+ * PUT /api/admin/update-parking-lot
+ * Otopark alanını günceller (sadece Capacity ve LocationDescription)
+ * AirportParkingSystem.UpdateParkingLot stored procedure'ünü çağırır
+ */
+router.put('/update-parking-lot', async (req, res) => {
+  console.log('📥 PUT /api/admin/update-parking-lot endpoint called');
+  console.log('📋 Request body:', JSON.stringify(req.body, null, 2));
+
+  try {
+    const {
+      parkingLotId,
+      capacity,
+      locationDescription,
+      userId
+    } = req.body;
+
+    if (!parkingLotId || !capacity || !userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Eksik parametreler: parkingLotId, capacity ve userId zorunludur.'
+      });
+    }
+
+    const capacityInt = parseInt(capacity);
+    if (isNaN(capacityInt) || capacityInt <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Kapasite geçerli bir pozitif sayı olmalıdır.'
+      });
+    }
+
+    const pool = await getPool();
+    const request = pool.request();
+
+    request.input('ParkingLotID', sql.Int, parkingLotId);
+    request.input('Capacity', sql.Int, capacityInt);
+    request.input('LocationDescription', sql.NVarChar(500), locationDescription || null);
+    request.input('UserID', sql.Int, userId);
+
+    await request.execute('AirportParkingSystem.UpdateParkingLot');
+
+    console.log(`✅ Parking lot ${parkingLotId} updated successfully by user ${userId}`);
+    res.json({
+      success: true,
+      message: 'Otopark alanı başarıyla güncellendi'
+    });
+
+  } catch (error) {
+    console.error('❌ Update parking lot error:', error);
+
+    let errorMessage = 'Sunucu hatası: ' + error.message;
+    if (error.message && error.message.includes('Otopark alanı bulunamadı')) {
+      errorMessage = 'Otopark alanı bulunamadı.';
+    } else if (error.message && error.message.includes('Kapasite geçerli bir pozitif sayı')) {
+      errorMessage = 'Kapasite geçerli bir pozitif sayı olmalıdır.';
+    }
+
+    res.status(500).json({
+      success: false,
+      message: errorMessage
+    });
+  }
+});
+
+/**
+ * POST /api/admin/add-parking-lot
+ * Yeni otopark alanı ekler
+ * AirportParkingSystem.AddParkingLot stored procedure'ünü çağırır
+ * ERD'ye göre: Parking_ParkingLots -> Flight_Airports (FK ile AirportID)
+ */
+router.post('/add-parking-lot', async (req, res) => {
+  console.log('📥 POST /api/admin/add-parking-lot endpoint called');
+  console.log('📋 Request body:', JSON.stringify(req.body, null, 2));
+
+  try {
+    const {
+      airportId,
+      lotName,
+      capacity,
+      locationDescription,
+      userId
+    } = req.body;
+
+    if (!airportId || !lotName || !capacity || !userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Eksik parametreler: airportId, lotName, capacity ve userId zorunludur.'
+      });
+    }
+
+    const capacityInt = parseInt(capacity);
+    if (isNaN(capacityInt) || capacityInt <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Kapasite geçerli bir pozitif sayı olmalıdır.'
+      });
+    }
+
+    if (!lotName.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Otopark adı boş olamaz.'
+      });
+    }
+
+    const pool = await getPool();
+    const request = pool.request();
+
+    request.input('AirportID', sql.Int, airportId);
+    request.input('LotName', sql.NVarChar(100), lotName.trim());
+    request.input('Capacity', sql.Int, capacityInt);
+    request.input('LocationDescription', sql.NVarChar(500), locationDescription?.trim() || null);
+    request.input('UserID', sql.Int, userId);
+
+    const result = await request.execute('AirportParkingSystem.AddParkingLot');
+
+    // Procedure'den dönen ParkingLotID'yi al
+    const parkingLotId = result.recordset?.[0]?.ParkingLotID || null;
+
+    console.log(`✅ Parking lot added successfully. ParkingLotID: ${parkingLotId}, by user ${userId}`);
+    res.json({
+      success: true,
+      message: 'Otopark alanı başarıyla eklendi',
+      data: {
+        parkingLotId: parkingLotId
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Add parking lot error:', error);
+
+    let errorMessage = 'Sunucu hatası: ' + error.message;
+    if (error.message && error.message.includes('Havalimanı bulunamadı')) {
+      errorMessage = 'Havalimanı bulunamadı.';
+    } else if (error.message && error.message.includes('aynı isimde bir otopark alanı zaten mevcut')) {
+      errorMessage = 'Bu havalimanında aynı isimde bir otopark alanı zaten mevcut.';
+    } else if (error.message && error.message.includes('Kapasite geçerli bir pozitif sayı')) {
+      errorMessage = 'Kapasite geçerli bir pozitif sayı olmalıdır.';
+    } else if (error.message && error.message.includes('Otopark adı boş olamaz')) {
+      errorMessage = 'Otopark adı boş olamaz.';
+    }
+
+    res.status(500).json({
+      success: false,
+      message: errorMessage
+    });
+  }
+});
+
+/**
+ * DELETE /api/admin/delete-parking-spot
+ * Park yeri siler
+ * AirportParkingSystem.DeleteParkingSpot stored procedure'ünü çağırır
+ * ERD'ye göre: Parking_ParkingSpots -> Parking_ParkingReservations (FK kontrolü yapılır)
+ */
+router.delete('/delete-parking-spot', async (req, res) => {
+  console.log('📥 DELETE /api/admin/delete-parking-spot endpoint called');
+  console.log('📋 Request body:', JSON.stringify(req.body, null, 2));
+  try {
+    const { spotId, userId } = req.body;
+
+    // Validasyon
+    if (!spotId || !userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Eksik parametreler: spotId ve userId zorunludur.'
+      });
+    }
+
+    const spotIdInt = parseInt(spotId);
+    const userIdInt = parseInt(userId);
+
+    if (isNaN(spotIdInt) || spotIdInt <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Park yeri ID geçerli bir pozitif sayı olmalıdır.'
+      });
+    }
+
+    if (isNaN(userIdInt) || userIdInt <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Kullanıcı ID geçerli bir pozitif sayı olmalıdır.'
+      });
+    }
+
+    const pool = await getPool();
+    const request = pool.request();
+
+    request.input('SpotID', sql.Int, spotIdInt);
+    request.input('UserID', sql.Int, userIdInt);
+
+    // Stored procedure'ü çağır
+    await request.execute('AirportParkingSystem.DeleteParkingSpot');
+
+    console.log(`✅ Parking spot ${spotIdInt} deleted successfully by user ${userIdInt}`);
+    res.json({
+      success: true,
+      message: 'Park yeri başarıyla silindi'
+    });
+
+  } catch (error) {
+    console.error('❌ Delete parking spot error:', error);
+
+    let errorMessage = 'Sunucu hatası: ' + error.message;
+    if (error.message && error.message.includes('Park yeri bulunamadı')) {
+      errorMessage = 'Park yeri bulunamadı.';
+    } else if (error.message && error.message.includes('aktif rezervasyonlar bulunduğu için silinemez')) {
+      errorMessage = 'Bu park yerine ait aktif rezervasyonlar bulunduğu için silinemez. Önce rezervasyonları iptal edin veya tamamlayın.';
+    } else if (error.message && error.message.includes('FOREIGN KEY constraint')) {
+      errorMessage = 'Bu park yerine ait rezervasyonlar bulunduğu için silinemez.';
+    }
+
+    res.status(500).json({
+      success: false,
+      message: errorMessage
+    });
+  }
+});
+
+/**
+ * GET /api/admin/parking-spots
+ * Tüm park yerlerini getirir
+ * AirportParkingSystem.GetParkingSpots stored procedure'ünü çağırır
+ * ERD'ye göre: Parking_ParkingSpots -> Parking_ParkingLots -> Flight_Airports (JOIN zinciri)
+ */
+router.get('/parking-spots', async (req, res) => {
+  console.log('📥 GET /api/admin/parking-spots endpoint called');
+  try {
+    const pool = await getPool();
+    const request = pool.request();
+
+    // Stored procedure'ü çağır
+    const result = await request.execute('AirportParkingSystem.GetParkingSpots');
+
+    console.log('🔍 Raw database result count:', result.recordset?.length || 0);
+    if (result.recordset && result.recordset.length > 0) {
+      console.log('🔍 Sample row keys:', Object.keys(result.recordset[0]));
+    }
+
+    if (!result.recordset || result.recordset.length === 0) {
+      console.log('⚠️ No parking spots found in database');
+      return res.json({
+        success: true,
+        data: []
+      });
+    }
+
+    // Kolon isimlerini normalize et (case-insensitive)
+    const getValue = (obj, ...keys) => {
+      for (const key of keys) {
+        const foundKey = Object.keys(obj).find(k => k.toLowerCase() === key.toLowerCase());
+        if (foundKey && obj[foundKey] != null) {
+          return obj[foundKey];
+        }
+      }
+      return null;
+    };
+
+    // Park yeri listesini map et
+    const parkingSpots = result.recordset.map((row) => {
+      const spotId = getValue(row, 'SpotID', 'spotID', 'spot_id', 'SpotId', 'spotId', 'ID', 'Id', 'id');
+      const parkingLotId = getValue(row, 'ParkingLotID', 'parkingLotID', 'parking_lot_id', 'ParkingLotId', 'parkingLotId');
+      const spotNumber = getValue(row, 'SpotNumber', 'spotNumber', 'spot_number', 'Number', 'number');
+      const isReserved = getValue(row, 'IsReserved', 'isReserved', 'is_reserved', 'Reserved', 'reserved');
+      
+      // Otopark alanı bilgileri
+      const parkingLotName = getValue(row, 'ParkingLotName', 'parkingLotName', 'parking_lot_name', 'LotName', 'lotName');
+      const parkingLotCapacity = getValue(row, 'ParkingLotCapacity', 'parkingLotCapacity', 'parking_lot_capacity', 'Capacity', 'capacity');
+      const parkingLotLocation = getValue(row, 'ParkingLotLocation', 'parkingLotLocation', 'parking_lot_location', 'Location', 'location');
+      
+      // Havalimanı bilgileri
+      const airportId = getValue(row, 'AirportID', 'airportID', 'airport_id', 'AirportId', 'airportId');
+      const airportName = getValue(row, 'AirportName', 'airportName', 'airport_name');
+      const airportIATA = getValue(row, 'AirportIATACode', 'airportIATACode', 'airport_iata_code', 'IATA_Code', 'iata_code', 'IATA', 'iata');
+      const airportCity = getValue(row, 'AirportCity', 'airportCity', 'airport_city', 'City', 'city');
+      const airportDisplayName = getValue(row, 'AirportDisplayName', 'airportDisplayName', 'airport_display_name') 
+        || (airportIATA && airportName ? `${airportIATA} - ${airportName}` : airportName || 'Bilinmeyen Havalimanı');
+
+      return {
+        SpotID: spotId || null,
+        ParkingLotID: parkingLotId || null,
+        SpotNumber: spotNumber || null,
+        IsReserved: isReserved === true || isReserved === 1 || isReserved === '1' || String(isReserved).toLowerCase() === 'true',
+        ParkingLotName: parkingLotName || null,
+        ParkingLotCapacity: parkingLotCapacity != null ? parseInt(parkingLotCapacity) : null,
+        ParkingLotLocation: parkingLotLocation || null,
+        AirportID: airportId || null,
+        AirportName: airportName || null,
+        AirportIATACode: airportIATA || null,
+        AirportCity: airportCity || null,
+        AirportDisplayName: airportDisplayName,
+      };
+    });
+
+    console.log('✅ Parking spots retrieved:', parkingSpots.length, 'spots');
+    if (parkingSpots.length > 0) {
+      console.log('📋 Sample parking spot:', JSON.stringify(parkingSpots[0], null, 2));
+    }
+
+    res.json({
+      success: true,
+      data: parkingSpots
+    });
+
+  } catch (error) {
+    console.error('❌ Admin parking-spots error:', error);
+    console.error('❌ Error stack:', error.stack);
+    res.status(500).json({
+      success: false,
+      message: 'Sunucu hatası: ' + error.message,
+      data: []
+    });
+  }
+});
+
+/**
+ * PUT /api/admin/update-parking-spot
+ * Park yerini günceller (sadece IsReserved)
+ * AirportParkingSystem.UpdateParkingSpot stored procedure'ünü çağırır
+ */
+router.put('/update-parking-spot', async (req, res) => {
+  console.log('📥 PUT /api/admin/update-parking-spot endpoint called');
+  console.log('📋 Request body:', JSON.stringify(req.body, null, 2));
+
+  try {
+    const {
+      spotId,
+      isReserved,
+      userId
+    } = req.body;
+
+    if (!spotId || isReserved === undefined || isReserved === null || !userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Eksik parametreler: spotId, isReserved ve userId zorunludur.'
+      });
+    }
+
+    const pool = await getPool();
+    const request = pool.request();
+
+    request.input('SpotID', sql.Int, spotId);
+    request.input('IsReserved', sql.Bit, isReserved === true || isReserved === 1 || isReserved === 'true' || String(isReserved).toLowerCase() === 'true');
+    request.input('UserID', sql.Int, userId);
+
+    await request.execute('AirportParkingSystem.UpdateParkingSpot');
+
+    console.log(`✅ Parking spot ${spotId} updated successfully by user ${userId}`);
+    res.json({
+      success: true,
+      message: 'Park yeri başarıyla güncellendi'
+    });
+
+  } catch (error) {
+    console.error('❌ Update parking spot error:', error);
+
+    let errorMessage = 'Sunucu hatası: ' + error.message;
+    if (error.message && error.message.includes('Park yeri bulunamadı')) {
+      errorMessage = 'Park yeri bulunamadı.';
+    }
+
+    res.status(500).json({
+      success: false,
+      message: errorMessage
+    });
+  }
+});
+
+/**
+ * POST /api/admin/add-parking-spot
+ * Yeni park yeri ekler
+ * AirportParkingSystem.AddParkingSpot stored procedure'ünü çağırır
+ */
+router.post('/add-parking-spot', async (req, res) => {
+  console.log('📥 POST /api/admin/add-parking-spot endpoint called');
+  console.log('📋 Request body:', JSON.stringify(req.body, null, 2));
+
+  try {
+    const {
+      parkingLotId,
+      spotNumber,
+      isReserved,
+      userId
+    } = req.body;
+
+    if (!parkingLotId || !spotNumber || isReserved === undefined || isReserved === null || !userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Eksik parametreler: parkingLotId, spotNumber, isReserved ve userId zorunludur.'
+      });
+    }
+
+    if (!spotNumber.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Park yeri numarası boş olamaz.'
+      });
+    }
+
+    const pool = await getPool();
+    const request = pool.request();
+
+    request.input('ParkingLotID', sql.Int, parkingLotId);
+    request.input('SpotNumber', sql.NVarChar(20), spotNumber.trim());
+    request.input('IsReserved', sql.Bit, isReserved === true || isReserved === 1 || isReserved === 'true' || String(isReserved).toLowerCase() === 'true');
+    request.input('UserID', sql.Int, userId);
+
+    const result = await request.execute('AirportParkingSystem.AddParkingSpot');
+
+    // Procedure'den dönen SpotID'yi al
+    const spotId = result.recordset?.[0]?.SpotID || null;
+
+    console.log(`✅ Parking spot added successfully. SpotID: ${spotId}, by user ${userId}`);
+    res.json({
+      success: true,
+      message: 'Park yeri başarıyla eklendi',
+      data: {
+        spotId: spotId
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Add parking spot error:', error);
+
+    let errorMessage = 'Sunucu hatası: ' + error.message;
+    if (error.message && error.message.includes('Otopark alanı bulunamadı')) {
+      errorMessage = 'Otopark alanı bulunamadı.';
+    } else if (error.message && error.message.includes('Park yeri numarası boş olamaz')) {
+      errorMessage = 'Park yeri numarası boş olamaz.';
+    } else if (error.message && error.message.includes('aynı numarada bir park yeri zaten mevcut')) {
+      errorMessage = 'Bu otopark alanında aynı numarada bir park yeri zaten mevcut.';
+    }
+
+    res.status(500).json({
+      success: false,
+      message: errorMessage
+    });
+  }
+});
+
+/**
+ * GET /api/admin/user-vehicles
+ * Tüm kullanıcı araçlarını getirir
+ * AirportParkingSystem.GetUserVehicles stored procedure'ünü çağırır
+ * ERD'ye göre: Parking_UserVehicles -> GeneralCommon_Users, Parking_VehicleTypes (JOIN zinciri)
+ */
+router.get('/user-vehicles', async (req, res) => {
+  console.log('📥 GET /api/admin/user-vehicles endpoint called');
+  try {
+    const pool = await getPool();
+    const request = pool.request();
+
+    // Stored procedure'ü çağır
+    const result = await request.execute('AirportParkingSystem.GetUserVehicles');
+
+    console.log('🔍 Raw database result count:', result.recordset?.length || 0);
+    if (result.recordset && result.recordset.length > 0) {
+      console.log('🔍 Sample row keys:', Object.keys(result.recordset[0]));
+    }
+
+    if (!result.recordset || result.recordset.length === 0) {
+      console.log('⚠️ No user vehicles found in database');
+      return res.json({
+        success: true,
+        data: []
+      });
+    }
+
+    // Kolon isimlerini normalize et (case-insensitive)
+    const getValue = (obj, ...keys) => {
+      for (const key of keys) {
+        const foundKey = Object.keys(obj).find(k => k.toLowerCase() === key.toLowerCase());
+        if (foundKey && obj[foundKey] != null) {
+          return obj[foundKey];
+        }
+      }
+      return null;
+    };
+
+    // Kullanıcı araç listesini map et
+    const userVehicles = result.recordset.map((row) => {
+      const vehicleId = getValue(row, 'VehicleID', 'vehicleID', 'vehicle_id', 'VehicleId', 'vehicleId', 'ID', 'Id', 'id');
+      const plateNumber = getValue(row, 'PlateNumber', 'plateNumber', 'plate_number', 'Number', 'number');
+      const userId = getValue(row, 'UserID', 'userID', 'user_id', 'UserId', 'userId');
+      const fullName = getValue(row, 'FullName', 'fullName', 'full_name', 'Name', 'name');
+      const email = getValue(row, 'Email', 'email');
+      const typeId = getValue(row, 'TypeID', 'typeID', 'type_id', 'TypeId', 'typeId');
+      const typeName = getValue(row, 'TypeName', 'typeName', 'type_name', 'Name', 'name');
+
+      return {
+        vehicleID: vehicleId,
+        plateNumber: plateNumber || '',
+        userID: userId,
+        userName: fullName || '',
+        userEmail: email || '',
+        typeID: typeId,
+        typeName: typeName || '',
+      };
+    });
+
+    console.log(`✅ ${userVehicles.length} user vehicles retrieved successfully`);
+    res.json({
+      success: true,
+      data: userVehicles
+    });
+
+  } catch (error) {
+    console.error('❌ Get user vehicles error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Sunucu hatası: ' + error.message
+    });
+  }
+});
+
+/**
+ * PUT /api/admin/update-user-vehicle
+ * Kullanıcı aracı günceller
+ * AirportParkingSystem.UpdateUserVehicle stored procedure'ünü çağırır
+ * ERD'ye göre: Parking_UserVehicles -> GeneralCommon_Users, Parking_VehicleTypes (FK kontrolü yapılır)
+ */
+router.put('/update-user-vehicle', async (req, res) => {
+  console.log('📥 PUT /api/admin/update-user-vehicle endpoint called');
+  console.log('📋 Request body:', JSON.stringify(req.body, null, 2));
+  try {
+    const {
+      vehicleId,
+      userId,
+      typeId,
+      plateNumber,
+      logUserId
+    } = req.body;
+
+    // Validasyon
+    if (!vehicleId || !userId || !typeId || !plateNumber || !logUserId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Eksik parametreler: vehicleId, userId, typeId, plateNumber ve logUserId zorunludur.'
+      });
+    }
+
+    if (!plateNumber.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Plaka numarası boş olamaz.'
+      });
+    }
+
+    const vehicleIdInt = parseInt(vehicleId);
+    const userIdInt = parseInt(userId);
+    const typeIdInt = parseInt(typeId);
+    const logUserIdInt = parseInt(logUserId);
+
+    if (isNaN(vehicleIdInt) || vehicleIdInt <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Araç ID geçerli bir pozitif sayı olmalıdır.'
+      });
+    }
+
+    if (isNaN(userIdInt) || userIdInt <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Kullanıcı ID geçerli bir pozitif sayı olmalıdır.'
+      });
+    }
+
+    if (isNaN(typeIdInt) || typeIdInt <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Araç tipi ID geçerli bir pozitif sayı olmalıdır.'
+      });
+    }
+
+    if (isNaN(logUserIdInt) || logUserIdInt <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'İşlem yapan kullanıcı ID geçerli bir pozitif sayı olmalıdır.'
+      });
+    }
+
+    const pool = await getPool();
+    const request = pool.request();
+
+    request.input('VehicleID', sql.Int, vehicleIdInt);
+    request.input('UserID', sql.Int, userIdInt);
+    request.input('TypeID', sql.Int, typeIdInt);
+    request.input('PlateNumber', sql.NVarChar(20), plateNumber.trim());
+    request.input('LogUserID', sql.Int, logUserIdInt);
+
+    // Stored procedure'ü çağır
+    await request.execute('AirportParkingSystem.UpdateUserVehicle');
+
+    console.log(`✅ User vehicle ${vehicleIdInt} updated successfully by user ${logUserIdInt}`);
+    res.json({
+      success: true,
+      message: 'Kullanıcı aracı başarıyla güncellendi'
+    });
+
+  } catch (error) {
+    console.error('❌ Update user vehicle error:', error);
+
+    let errorMessage = 'Sunucu hatası: ' + error.message;
+    if (error.message && error.message.includes('Araç bulunamadı')) {
+      errorMessage = 'Araç bulunamadı.';
+    } else if (error.message && error.message.includes('Kullanıcı bulunamadı')) {
+      errorMessage = 'Kullanıcı bulunamadı.';
+    } else if (error.message && error.message.includes('Araç tipi bulunamadı')) {
+      errorMessage = 'Araç tipi bulunamadı.';
+    } else if (error.message && error.message.includes('Plaka numarası boş olamaz')) {
+      errorMessage = 'Plaka numarası boş olamaz.';
+    } else if (error.message && error.message.includes('aynı plaka numarasına sahip başka bir araç zaten mevcut')) {
+      errorMessage = 'Bu kullanıcı için aynı plaka numarasına sahip başka bir araç zaten mevcut.';
+    } else if (error.message && error.message.includes('FOREIGN KEY constraint')) {
+      errorMessage = 'Geçersiz kullanıcı veya araç tipi.';
+    }
+
+    res.status(500).json({
+      success: false,
+      message: errorMessage
+    });
+  }
+});
+
+/**
+ * PUT /api/admin/update-user-vehicle
+ * Kullanıcı aracı günceller
+ * AirportParkingSystem.UpdateUserVehicle stored procedure'ünü çağırır
+ * ERD'ye göre: Parking_UserVehicles -> GeneralCommon_Users, Parking_VehicleTypes (FK kontrolü yapılır)
+ */
+router.put('/update-user-vehicle', async (req, res) => {
+  console.log('📥 PUT /api/admin/update-user-vehicle endpoint called');
+  console.log('📋 Request body:', JSON.stringify(req.body, null, 2));
+  try {
+    const {
+      vehicleId,
+      userId,
+      typeId,
+      plateNumber,
+      logUserId
+    } = req.body;
+
+    // Validasyon
+    if (!vehicleId || !userId || !typeId || !plateNumber || !logUserId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Eksik parametreler: vehicleId, userId, typeId, plateNumber ve logUserId zorunludur.'
+      });
+    }
+
+    const vehicleIdInt = parseInt(vehicleId);
+    const userIdInt = parseInt(userId);
+    const typeIdInt = parseInt(typeId);
+    const logUserIdInt = parseInt(logUserId);
+
+    if (isNaN(vehicleIdInt) || vehicleIdInt <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Araç ID geçerli bir pozitif sayı olmalıdır.'
+      });
+    }
+
+    if (isNaN(userIdInt) || userIdInt <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Kullanıcı ID geçerli bir pozitif sayı olmalıdır.'
+      });
+    }
+
+    if (isNaN(typeIdInt) || typeIdInt <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Araç tipi ID geçerli bir pozitif sayı olmalıdır.'
+      });
+    }
+
+    if (isNaN(logUserIdInt) || logUserIdInt <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Log kullanıcı ID geçerli bir pozitif sayı olmalıdır.'
+      });
+    }
+
+    if (!plateNumber.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Plaka numarası boş olamaz.'
+      });
+    }
+
+    const pool = await getPool();
+    const request = pool.request();
+
+    request.input('VehicleID', sql.Int, vehicleIdInt);
+    request.input('UserID', sql.Int, userIdInt);
+    request.input('TypeID', sql.Int, typeIdInt);
+    request.input('PlateNumber', sql.NVarChar(20), plateNumber.trim());
+    request.input('LogUserID', sql.Int, logUserIdInt);
+
+    // Stored procedure'ü çağır
+    await request.execute('AirportParkingSystem.UpdateUserVehicle');
+
+    console.log(`✅ User vehicle ${vehicleIdInt} updated successfully by user ${logUserIdInt}`);
+    res.json({
+      success: true,
+      message: 'Araç başarıyla güncellendi'
+    });
+
+  } catch (error) {
+    console.error('❌ Update user vehicle error:', error);
+
+    let errorMessage = 'Sunucu hatası: ' + error.message;
+    if (error.message && error.message.includes('Araç bulunamadı')) {
+      errorMessage = 'Araç bulunamadı.';
+    } else if (error.message && error.message.includes('Kullanıcı bulunamadı')) {
+      errorMessage = 'Kullanıcı bulunamadı.';
+    } else if (error.message && error.message.includes('Araç tipi bulunamadı')) {
+      errorMessage = 'Araç tipi bulunamadı.';
+    } else if (error.message && error.message.includes('Plaka numarası boş olamaz')) {
+      errorMessage = 'Plaka numarası boş olamaz.';
+    } else if (error.message && error.message.includes('aynı plaka numarasına sahip başka bir araç zaten mevcut')) {
+      errorMessage = 'Bu kullanıcı için aynı plaka numarasına sahip başka bir araç zaten mevcut.';
+    } else if (error.message && error.message.includes('FOREIGN KEY constraint')) {
+      errorMessage = 'Geçersiz kullanıcı veya araç tipi.';
+    }
+
+    res.status(500).json({
+      success: false,
+      message: errorMessage
+    });
+  }
+});
+
+/**
+ * DELETE /api/admin/delete-user-vehicle
+ * Kullanıcı aracı siler
+ * AirportParkingSystem.DeleteUserVehicle stored procedure'ünü çağırır
+ * ERD'ye göre: Parking_UserVehicles -> Parking_ParkingReservations (FK kontrolü yapılır)
+ */
+router.delete('/delete-user-vehicle', async (req, res) => {
+  console.log('📥 DELETE /api/admin/delete-user-vehicle endpoint called');
+  console.log('📋 Request body:', JSON.stringify(req.body, null, 2));
+  try {
+    const { vehicleId, logUserId } = req.body;
+
+    // Validasyon
+    if (!vehicleId || !logUserId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Eksik parametreler: vehicleId ve logUserId zorunludur.'
+      });
+    }
+
+    const vehicleIdInt = parseInt(vehicleId);
+    const logUserIdInt = parseInt(logUserId);
+
+    if (isNaN(vehicleIdInt) || vehicleIdInt <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Araç ID geçerli bir pozitif sayı olmalıdır.'
+      });
+    }
+
+    if (isNaN(logUserIdInt) || logUserIdInt <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Log kullanıcı ID geçerli bir pozitif sayı olmalıdır.'
+      });
+    }
+
+    const pool = await getPool();
+    const request = pool.request();
+
+    request.input('VehicleID', sql.Int, vehicleIdInt);
+    request.input('LogUserID', sql.Int, logUserIdInt);
+
+    // Stored procedure'ü çağır
+    await request.execute('AirportParkingSystem.DeleteUserVehicle');
+
+    console.log(`✅ User vehicle ${vehicleIdInt} deleted successfully by user ${logUserIdInt}`);
+    res.json({
+      success: true,
+      message: 'Araç başarıyla silindi'
+    });
+
+  } catch (error) {
+    console.error('❌ Delete user vehicle error:', error);
+
+    let errorMessage = 'Sunucu hatası: ' + error.message;
+    if (error.message && error.message.includes('Araç bulunamadı')) {
+      errorMessage = 'Araç bulunamadı.';
+    } else if (error.message && error.message.includes('aktif rezervasyonlar bulunduğu için silinemez')) {
+      errorMessage = 'Bu araca ait aktif/tamamlanmamış rezervasyonlar bulunduğu için silinemez. Önce rezervasyonları iptal edin veya tamamlayın.';
+    } else if (error.message && error.message.includes('FOREIGN KEY constraint')) {
+      errorMessage = 'Bu araca ait rezervasyonlar bulunduğu için silinemez.';
+    }
+
+    res.status(500).json({
+      success: false,
+      message: errorMessage
+    });
+  }
+});
+
+/**
+ * POST /api/admin/add-user-vehicle
+ * Yeni kullanıcı aracı ekler
+ * AirportParkingSystem.AddUserVehicle stored procedure'ünü çağırır
+ * ERD'ye göre: Parking_UserVehicles -> GeneralCommon_Users, Parking_VehicleTypes (FK kontrolü yapılır)
+ */
+router.post('/add-user-vehicle', async (req, res) => {
+  console.log('📥 POST /api/admin/add-user-vehicle endpoint called');
+  console.log('📋 Request body:', JSON.stringify(req.body, null, 2));
+  try {
+    const {
+      userId,
+      typeId,
+      plateNumber,
+      logUserId
+    } = req.body;
+
+    // Validasyon
+    if (!userId || !typeId || !plateNumber || !logUserId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Eksik parametreler: userId, typeId, plateNumber ve logUserId zorunludur.'
+      });
+    }
+
+    const userIdInt = parseInt(userId);
+    const typeIdInt = parseInt(typeId);
+    const logUserIdInt = parseInt(logUserId);
+
+    if (isNaN(userIdInt) || userIdInt <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Kullanıcı ID geçerli bir pozitif sayı olmalıdır.'
+      });
+    }
+
+    if (isNaN(typeIdInt) || typeIdInt <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Araç tipi ID geçerli bir pozitif sayı olmalıdır.'
+      });
+    }
+
+    if (isNaN(logUserIdInt) || logUserIdInt <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Log kullanıcı ID geçerli bir pozitif sayı olmalıdır.'
+      });
+    }
+
+    if (!plateNumber.trim()) {
+      return res.status(400).json({
+        success: false,
+        message: 'Plaka numarası boş olamaz.'
+      });
+    }
+
+    const pool = await getPool();
+    const request = pool.request();
+
+    request.input('UserID', sql.Int, userIdInt);
+    request.input('TypeID', sql.Int, typeIdInt);
+    request.input('PlateNumber', sql.NVarChar(20), plateNumber.trim());
+    request.input('LogUserID', sql.Int, logUserIdInt);
+
+    // Stored procedure'ü çağır
+    const result = await request.execute('AirportParkingSystem.AddUserVehicle');
+
+    // Procedure'den dönen VehicleID'yi al
+    const vehicleId = result.recordset?.[0]?.VehicleID || null;
+
+    console.log(`✅ User vehicle added successfully. VehicleID: ${vehicleId}, by user ${logUserIdInt}`);
+    res.json({
+      success: true,
+      message: 'Araç başarıyla eklendi',
+      data: {
+        vehicleId: vehicleId
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Add user vehicle error:', error);
+
+    let errorMessage = 'Sunucu hatası: ' + error.message;
+    if (error.message && error.message.includes('Kullanıcı bulunamadı')) {
+      errorMessage = 'Kullanıcı bulunamadı.';
+    } else if (error.message && error.message.includes('Araç tipi bulunamadı')) {
+      errorMessage = 'Araç tipi bulunamadı.';
+    } else if (error.message && error.message.includes('Plaka numarası boş olamaz')) {
+      errorMessage = 'Plaka numarası boş olamaz.';
+    } else if (error.message && error.message.includes('aynı plaka numarasına sahip bir araç zaten mevcut')) {
+      errorMessage = 'Bu kullanıcı için aynı plaka numarasına sahip bir araç zaten mevcut.';
+    } else if (error.message && error.message.includes('FOREIGN KEY constraint')) {
+      errorMessage = 'Geçersiz kullanıcı veya araç tipi.';
+    }
+
+    res.status(500).json({
+      success: false,
+      message: errorMessage
+    });
+  }
+});
+
 module.exports = router;
 
 

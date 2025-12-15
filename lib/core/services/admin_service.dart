@@ -87,8 +87,37 @@ class AdminService {
       'http://localhost:3000/api/admin/add-passenger';
   static const String _vehicleTypesApiUrl =
       'http://localhost:3000/api/admin/vehicle-types';
+  static const String _updateVehicleTypeApiUrl =
+      'http://localhost:3000/api/admin/update-vehicle-type';
+  static const String _parkingLotsApiUrl =
+      'http://localhost:3000/api/admin/parking-lots';
+  static const String _updateParkingLotApiUrl =
+      'http://localhost:3000/api/admin/update-parking-lot';
+  static const String _addParkingLotApiUrl =
+      'http://localhost:3000/api/admin/add-parking-lot';
+  static const String _parkingSpotsApiUrl =
+      'http://localhost:3000/api/admin/parking-spots';
+  static const String _updateParkingSpotApiUrl =
+      'http://localhost:3000/api/admin/update-parking-spot';
+  static const String _addParkingSpotApiUrl =
+      'http://localhost:3000/api/admin/add-parking-spot';
   // Mobil (Android Emülatörü) için: 'http://10.0.2.2:3000/api/admin/...'
   // Mobil (Gerçek Cihaz) için: Bilgisayarınızın yerel IP adresi.
+
+  static const String _deleteParkingSpotApiUrl =
+      'http://localhost:3000/api/admin/delete-parking-spot';
+
+  static const String _userVehiclesApiUrl =
+      'http://localhost:3000/api/admin/user-vehicles';
+
+  static const String _updateUserVehicleApiUrl =
+      'http://localhost:3000/api/admin/update-user-vehicle';
+
+  static const String _deleteUserVehicleApiUrl =
+      'http://localhost:3000/api/admin/delete-user-vehicle';
+
+  static const String _addUserVehicleApiUrl =
+      'http://localhost:3000/api/admin/add-user-vehicle';
 
   /// Admin dashboard istatistiklerini getirir
   /// Başarılıysa AdminDashboardStats, başarısızsa empty stats döner
@@ -287,14 +316,16 @@ class AdminService {
       debugPrint('📡 Calling delete gate API: $_deleteGateApiUrl');
       debugPrint('📋 Delete data: gateId=$gateId, userId=$userId');
       
-      final response = await http.delete(
-        Uri.parse(_deleteGateApiUrl),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'gateId': gateId,
-          'userId': userId,
-        }),
-      );
+      // http.delete() body parametresi desteklemediği için http.Request kullanıyoruz
+      final request = http.Request('DELETE', Uri.parse(_deleteGateApiUrl));
+      request.headers.addAll({'Content-Type': 'application/json'});
+      request.body = json.encode({
+        'gateId': gateId,
+        'userId': userId,
+      });
+      
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
 
       debugPrint('📡 Delete gate API response: status=${response.statusCode}');
 
@@ -501,14 +532,16 @@ class AdminService {
       debugPrint('📡 Calling delete employee API: $_deleteEmployeeApiUrl');
       debugPrint('📋 Delete data: employeeId=$employeeId, userId=$userId');
       
-      final response = await http.delete(
-        Uri.parse(_deleteEmployeeApiUrl),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'employeeId': employeeId,
-          'userId': userId,
-        }),
-      );
+      // http.delete() body parametresi desteklemediği için http.Request kullanıyoruz
+      final request = http.Request('DELETE', Uri.parse(_deleteEmployeeApiUrl));
+      request.headers.addAll({'Content-Type': 'application/json'});
+      request.body = json.encode({
+        'employeeId': employeeId,
+        'userId': userId,
+      });
+      
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
 
       debugPrint('📡 Delete employee API response: status=${response.statusCode}');
       debugPrint('📡 Delete employee API response body (raw): ${response.body}');
@@ -873,6 +906,590 @@ class AdminService {
     }
   }
 
+  /// Tüm otopark alanlarını getirir
+  /// Başarılıysa List<ParkingLot>, başarısızsa boş liste döner
+  Future<List<ParkingLot>> getParkingLots() async {
+    try {
+      debugPrint('📡 Calling parking lots API: $_parkingLotsApiUrl');
+      final response = await http.get(
+        Uri.parse(_parkingLotsApiUrl),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      // Response body'nin JSON olup olmadığını kontrol et
+      final contentType = response.headers['content-type'] ?? '';
+      if (!contentType.contains('application/json')) {
+        debugPrint('⚠️ Admin parking lots API: JSON olmayan response alındı. Status: ${response.statusCode}, Content-Type: $contentType');
+        return [];
+      }
+
+      final responseBody = json.decode(response.body);
+
+      if (response.statusCode == 200 && responseBody['success'] == true) {
+        // API'den gelen data listesini ParkingLot modeline dönüştür
+        final data = responseBody['data'] as List<dynamic>?;
+        debugPrint('📥 Admin parking lots API: ${data?.length ?? 0} parking lots retrieved');
+        if (data != null && data.isNotEmpty) {
+          debugPrint('📋 First parking lot sample: ${data[0]}');
+          final parkingLots = data.map((item) => ParkingLot.fromJson(item as Map<String, dynamic>)).toList();
+          debugPrint('✅ Parsed ${parkingLots.length} parking lots successfully');
+          return parkingLots;
+        }
+        debugPrint('⚠️ API returned empty data array');
+        return [];
+      }
+
+      debugPrint('⚠️ API response not successful: status=${response.statusCode}, success=${responseBody['success']}');
+
+      // Hata durumunda boş liste döndür
+      debugPrint('⚠️ Admin parking lots API hatası: ${response.statusCode}');
+      return [];
+    } catch (e) {
+      // Ağ bağlantısı hatası
+      debugPrint('❌ Admin parking lots HTTP hatası: $e');
+      return [];
+    }
+  }
+
+  /// Otopark alanını günceller (sadece Capacity ve LocationDescription)
+  /// Başarılıysa true, başarısızsa false döner
+  /// LotName ve AirportID değiştirilemez
+  Future<bool> updateParkingLot({
+    required int parkingLotId,
+    required int capacity,
+    String? locationDescription,
+    required int userId,
+  }) async {
+    try {
+      debugPrint('📡 Calling update parking lot API: $_updateParkingLotApiUrl');
+
+      final requestBody = {
+        'parkingLotId': parkingLotId,
+        'capacity': capacity,
+        'locationDescription': locationDescription,
+        'userId': userId,
+      };
+
+      debugPrint('📋 Update parking lot request body: $requestBody');
+
+      final response = await http.put(
+        Uri.parse(_updateParkingLotApiUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(requestBody),
+      );
+
+      debugPrint('📡 Update parking lot API response: status=${response.statusCode}, body length=${response.body.length}');
+
+      final responseBody = json.decode(response.body);
+
+      if (response.statusCode == 200 && responseBody['success'] == true) {
+        debugPrint('✅ Parking lot updated successfully');
+        return true;
+      }
+
+      debugPrint('⚠️ Update parking lot API response not successful: status=${response.statusCode}, success=${responseBody['success']}');
+      debugPrint('⚠️ Error message: ${responseBody['message'] ?? 'Bilinmeyen hata'}');
+      return false;
+    } catch (e) {
+      debugPrint('❌ Update parking lot HTTP hatası: $e');
+      return false;
+    }
+  }
+
+  /// Yeni otopark alanı ekler
+  /// Başarılıysa true ve ParkingLotID döner, başarısızsa false döner
+  /// AirportID, LotName ve Capacity zorunludur
+  Future<Map<String, dynamic>> addParkingLot({
+    required int airportId,
+    required String lotName,
+    required int capacity,
+    String? locationDescription,
+    required int userId,
+  }) async {
+    try {
+      debugPrint('📡 Calling add parking lot API: $_addParkingLotApiUrl');
+
+      final requestBody = {
+        'airportId': airportId,
+        'lotName': lotName.trim(),
+        'capacity': capacity,
+        'locationDescription': locationDescription?.trim(),
+        'userId': userId,
+      };
+
+      debugPrint('📋 Add parking lot request body: $requestBody');
+
+      final response = await http.post(
+        Uri.parse(_addParkingLotApiUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(requestBody),
+      );
+
+      debugPrint('📡 Add parking lot API response: status=${response.statusCode}, body length=${response.body.length}');
+
+      final responseBody = json.decode(response.body);
+
+      if (response.statusCode == 200 && responseBody['success'] == true) {
+        final parkingLotId = responseBody['data']?['parkingLotId'];
+        debugPrint('✅ Parking lot added successfully. ParkingLotID: $parkingLotId');
+        return {
+          'success': true,
+          'parkingLotId': parkingLotId,
+        };
+      }
+
+      debugPrint('⚠️ Add parking lot API response not successful: status=${response.statusCode}, success=${responseBody['success']}');
+      debugPrint('⚠️ Error message: ${responseBody['message'] ?? 'Bilinmeyen hata'}');
+      return {
+        'success': false,
+        'message': responseBody['message'] ?? 'Otopark alanı eklenirken bir hata oluştu',
+      };
+    } catch (e) {
+      debugPrint('❌ Add parking lot HTTP hatası: $e');
+      return {
+        'success': false,
+        'message': 'Bağlantı hatası: ${e.toString()}',
+      };
+    }
+  }
+
+  /// Tüm park yerlerini getirir
+  /// Başarılıysa List<ParkingSpot>, başarısızsa boş liste döner
+  Future<List<ParkingSpot>> getParkingSpots() async {
+    try {
+      debugPrint('📡 Calling parking spots API: $_parkingSpotsApiUrl');
+      final response = await http.get(
+        Uri.parse(_parkingSpotsApiUrl),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      // Response body'nin JSON olup olmadığını kontrol et
+      final contentType = response.headers['content-type'] ?? '';
+      if (!contentType.contains('application/json')) {
+        debugPrint('⚠️ Admin parking spots API: JSON olmayan response alındı. Status: ${response.statusCode}, Content-Type: $contentType');
+        return [];
+      }
+
+      final responseBody = json.decode(response.body);
+
+      if (response.statusCode == 200 && responseBody['success'] == true) {
+        // API'den gelen data listesini ParkingSpot modeline dönüştür
+        final data = responseBody['data'] as List<dynamic>?;
+        debugPrint('📥 Admin parking spots API: ${data?.length ?? 0} parking spots retrieved');
+        if (data != null && data.isNotEmpty) {
+          debugPrint('📋 First parking spot sample: ${data[0]}');
+          final parkingSpots = data.map((item) => ParkingSpot.fromJson(item as Map<String, dynamic>)).toList();
+          debugPrint('✅ Parsed ${parkingSpots.length} parking spots successfully');
+          return parkingSpots;
+        }
+        debugPrint('⚠️ API returned empty data array');
+        return [];
+      }
+
+      debugPrint('⚠️ API response not successful: status=${response.statusCode}, success=${responseBody['success']}');
+
+      // Hata durumunda boş liste döndür
+      debugPrint('⚠️ Admin parking spots API hatası: ${response.statusCode}');
+      return [];
+    } catch (e) {
+      // Ağ bağlantısı hatası
+      debugPrint('❌ Admin parking spots HTTP hatası: $e');
+      return [];
+    }
+  }
+
+  /// Park yerini günceller (sadece IsReserved)
+  /// Başarılıysa true, başarısızsa false döner
+  /// ParkingLotID ve SpotNumber değiştirilemez
+  Future<bool> updateParkingSpot({
+    required int spotId,
+    required bool isReserved,
+    required int userId,
+  }) async {
+    try {
+      debugPrint('📡 Calling update parking spot API: $_updateParkingSpotApiUrl');
+
+      final requestBody = {
+        'spotId': spotId,
+        'isReserved': isReserved,
+        'userId': userId,
+      };
+
+      debugPrint('📋 Update parking spot request body: $requestBody');
+
+      final response = await http.put(
+        Uri.parse(_updateParkingSpotApiUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(requestBody),
+      );
+
+      debugPrint('📡 Update parking spot API response: status=${response.statusCode}, body length=${response.body.length}');
+
+      final responseBody = json.decode(response.body);
+
+      if (response.statusCode == 200 && responseBody['success'] == true) {
+        debugPrint('✅ Parking spot updated successfully');
+        return true;
+      }
+
+      debugPrint('⚠️ Update parking spot API response not successful: status=${response.statusCode}, success=${responseBody['success']}');
+      debugPrint('⚠️ Error message: ${responseBody['message'] ?? 'Bilinmeyen hata'}');
+      return false;
+    } catch (e) {
+      debugPrint('❌ Update parking spot HTTP hatası: $e');
+      return false;
+    }
+  }
+
+  /// Yeni park yeri ekler
+  /// Başarılıysa true ve SpotID döner, başarısızsa false döner
+  /// ParkingLotID, SpotNumber ve IsReserved zorunludur
+  Future<Map<String, dynamic>> addParkingSpot({
+    required int parkingLotId,
+    required String spotNumber,
+    required bool isReserved,
+    required int userId,
+  }) async {
+    try {
+      debugPrint('📡 Calling add parking spot API: $_addParkingSpotApiUrl');
+
+      final requestBody = {
+        'parkingLotId': parkingLotId,
+        'spotNumber': spotNumber.trim(),
+        'isReserved': isReserved,
+        'userId': userId,
+      };
+
+      debugPrint('📋 Add parking spot request body: $requestBody');
+
+      final response = await http.post(
+        Uri.parse(_addParkingSpotApiUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(requestBody),
+      );
+
+      debugPrint('📡 Add parking spot API response: status=${response.statusCode}, body length=${response.body.length}');
+
+      final responseBody = json.decode(response.body);
+
+      if (response.statusCode == 200 && responseBody['success'] == true) {
+        final spotId = responseBody['data']?['spotId'];
+        debugPrint('✅ Parking spot added successfully. SpotID: $spotId');
+        return {
+          'success': true,
+          'spotId': spotId,
+        };
+      }
+
+      debugPrint('⚠️ Add parking spot API response not successful: status=${response.statusCode}, success=${responseBody['success']}');
+      debugPrint('⚠️ Error message: ${responseBody['message'] ?? 'Bilinmeyen hata'}');
+      return {
+        'success': false,
+        'message': responseBody['message'] ?? 'Park yeri eklenirken bir hata oluştu',
+      };
+    } catch (e) {
+      debugPrint('❌ Add parking spot HTTP hatası: $e');
+      return {
+        'success': false,
+        'message': 'Bağlantı hatası: ${e.toString()}',
+      };
+    }
+  }
+
+  /// Park yeri siler
+  /// Başarılıysa true, başarısızsa false döner
+  Future<bool> deleteParkingSpot({
+    required int spotId,
+    required int userId,
+  }) async {
+    try {
+      debugPrint('📡 Calling delete parking spot API: $_deleteParkingSpotApiUrl');
+      debugPrint('📋 Delete data: spotId=$spotId, userId=$userId');
+      
+      // http.delete() body parametresi desteklemediği için http.Request kullanıyoruz
+      final request = http.Request('DELETE', Uri.parse(_deleteParkingSpotApiUrl));
+      request.headers.addAll({'Content-Type': 'application/json'});
+      request.body = json.encode({
+        'spotId': spotId,
+        'userId': userId,
+      });
+      
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      debugPrint('📡 Delete parking spot API response: status=${response.statusCode}, body length=${response.body.length}');
+
+      // Response body'nin JSON olup olmadığını kontrol et
+      final contentType = response.headers['content-type'] ?? '';
+      if (!contentType.contains('application/json')) {
+        debugPrint('⚠️ Admin delete parking spot API: JSON olmayan response alındı. Status: ${response.statusCode}, Content-Type: $contentType');
+        debugPrint('⚠️ Response body (first 500 chars): ${response.body.length > 500 ? response.body.substring(0, 500) : response.body}');
+        return false;
+      }
+
+      final responseBody = json.decode(response.body);
+      debugPrint('📥 Delete parking spot API response body (parsed): $responseBody');
+
+      if (response.statusCode == 200 && responseBody['success'] == true) {
+        debugPrint('✅ Parking spot deleted successfully');
+        return true;
+      } else {
+        final errorMessage = responseBody['message'] ?? 'Bilinmeyen hata';
+        debugPrint('⚠️ Delete parking spot API response not successful: status=${response.statusCode}, message=$errorMessage');
+        debugPrint('⚠️ Full response body: $responseBody');
+        return false;
+      }
+    } catch (e) {
+      debugPrint('❌ Admin delete parking spot HTTP hatası: $e');
+      debugPrint('❌ Error type: ${e.runtimeType}');
+      if (e is Exception) {
+        debugPrint('❌ Exception details: $e');
+      }
+      return false;
+    }
+  }
+
+  /// Kullanıcı araçlarını getirir
+  /// Başarılıysa List<UserVehicle>, başarısızsa boş liste döner
+  Future<List<UserVehicle>> getUserVehicles() async {
+    try {
+      debugPrint('📡 Calling user vehicles API: $_userVehiclesApiUrl');
+      final response = await http.get(
+        Uri.parse(_userVehiclesApiUrl),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      // Response body'nin JSON olup olmadığını kontrol et
+      final contentType = response.headers['content-type'] ?? '';
+      if (!contentType.contains('application/json')) {
+        debugPrint('⚠️ Admin user vehicles API: JSON olmayan response alındı. Status: ${response.statusCode}, Content-Type: $contentType');
+        return [];
+      }
+
+      final responseBody = json.decode(response.body);
+
+      if (response.statusCode == 200 && responseBody['success'] == true) {
+        // API'den gelen data listesini UserVehicle modeline dönüştür
+        final data = responseBody['data'] as List<dynamic>?;
+        debugPrint('📥 Admin user vehicles API: ${data?.length ?? 0} vehicles retrieved');
+        if (data != null && data.isNotEmpty) {
+          debugPrint('📋 First vehicle sample: ${data[0]}');
+          final vehicles = data.map((item) => UserVehicle.fromJson(item as Map<String, dynamic>)).toList();
+          debugPrint('✅ Parsed ${vehicles.length} vehicles successfully');
+          return vehicles;
+        }
+        debugPrint('⚠️ API returned empty data array');
+        return [];
+      }
+      
+      debugPrint('⚠️ API response not successful: status=${response.statusCode}, success=${responseBody['success']}');
+
+      // Hata durumunda boş liste döndür
+      debugPrint('⚠️ Admin user vehicles API hatası: ${response.statusCode}');
+      return [];
+    } catch (e) {
+      // Ağ bağlantısı hatası
+      debugPrint('❌ Admin user vehicles HTTP hatası: $e');
+      return [];
+    }
+  }
+
+  /// Kullanıcı aracı günceller
+  /// Başarılıysa true, başarısızsa false döner
+  Future<bool> updateUserVehicle({
+    required int vehicleId,
+    required int userId,
+    required int typeId,
+    required String plateNumber,
+    required int logUserId,
+  }) async {
+    try {
+      debugPrint('📡 Calling update user vehicle API: $_updateUserVehicleApiUrl');
+
+      final requestBody = {
+        'vehicleId': vehicleId,
+        'userId': userId,
+        'typeId': typeId,
+        'plateNumber': plateNumber.trim(),
+        'logUserId': logUserId,
+      };
+
+      debugPrint('📋 Update user vehicle request body: $requestBody');
+
+      final response = await http.put(
+        Uri.parse(_updateUserVehicleApiUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(requestBody),
+      );
+
+      debugPrint('📡 Update user vehicle API response: status=${response.statusCode}, body length=${response.body.length}');
+
+      final responseBody = json.decode(response.body);
+
+      if (response.statusCode == 200 && responseBody['success'] == true) {
+        debugPrint('✅ User vehicle updated successfully');
+        return true;
+      }
+
+      debugPrint('⚠️ Update user vehicle API response not successful: status=${response.statusCode}, success=${responseBody['success']}');
+      debugPrint('⚠️ Error message: ${responseBody['message'] ?? 'Bilinmeyen hata'}');
+      return false;
+    } catch (e) {
+      debugPrint('❌ Update user vehicle HTTP hatası: $e');
+      return false;
+    }
+  }
+
+  /// Kullanıcı aracı siler
+  /// Başarılıysa true, başarısızsa false döner
+  Future<bool> deleteUserVehicle({
+    required int vehicleId,
+    required int logUserId,
+  }) async {
+    try {
+      debugPrint('📡 Calling delete user vehicle API: $_deleteUserVehicleApiUrl');
+      debugPrint('📋 Delete data: vehicleId=$vehicleId, logUserId=$logUserId');
+      
+      // http.delete() body parametresi desteklemediği için http.Request kullanıyoruz
+      final request = http.Request('DELETE', Uri.parse(_deleteUserVehicleApiUrl));
+      request.headers.addAll({'Content-Type': 'application/json'});
+      request.body = json.encode({
+        'vehicleId': vehicleId,
+        'logUserId': logUserId,
+      });
+      
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      debugPrint('📡 Delete user vehicle API response: status=${response.statusCode}, body length=${response.body.length}');
+
+      // Response body'nin JSON olup olmadığını kontrol et
+      final contentType = response.headers['content-type'] ?? '';
+      if (!contentType.contains('application/json')) {
+        debugPrint('⚠️ Admin delete user vehicle API: JSON olmayan response alındı. Status: ${response.statusCode}, Content-Type: $contentType');
+        debugPrint('⚠️ Response body (first 500 chars): ${response.body.length > 500 ? response.body.substring(0, 500) : response.body}');
+        return false;
+      }
+
+      final responseBody = json.decode(response.body);
+      debugPrint('📥 Delete user vehicle API response body (parsed): $responseBody');
+
+      if (response.statusCode == 200 && responseBody['success'] == true) {
+        debugPrint('✅ User vehicle deleted successfully');
+        return true;
+      } else {
+        final errorMessage = responseBody['message'] ?? 'Bilinmeyen hata';
+        debugPrint('⚠️ Delete user vehicle API response not successful: status=${response.statusCode}, message=$errorMessage');
+        debugPrint('⚠️ Full response body: $responseBody');
+        return false;
+      }
+    } catch (e) {
+      debugPrint('❌ Admin delete user vehicle HTTP hatası: $e');
+      debugPrint('❌ Error type: ${e.runtimeType}');
+      if (e is Exception) {
+        debugPrint('❌ Exception details: $e');
+      }
+      return false;
+    }
+  }
+
+  /// Yeni kullanıcı aracı ekler
+  /// Başarılıysa Map<String, dynamic> (success, vehicleId), başarısızsa (success: false, message) döner
+  Future<Map<String, dynamic>> addUserVehicle({
+    required int userId,
+    required int typeId,
+    required String plateNumber,
+    required int logUserId,
+  }) async {
+    try {
+      debugPrint('📡 Calling add user vehicle API: $_addUserVehicleApiUrl');
+
+      final requestBody = {
+        'userId': userId,
+        'typeId': typeId,
+        'plateNumber': plateNumber.trim(),
+        'logUserId': logUserId,
+      };
+
+      debugPrint('📋 Add user vehicle request body: $requestBody');
+
+      final response = await http.post(
+        Uri.parse(_addUserVehicleApiUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(requestBody),
+      );
+
+      debugPrint('📡 Add user vehicle API response: status=${response.statusCode}, body length=${response.body.length}');
+
+      final responseBody = json.decode(response.body);
+
+      if (response.statusCode == 200 && responseBody['success'] == true) {
+        final vehicleId = responseBody['data']?['vehicleId'];
+        debugPrint('✅ User vehicle added successfully. VehicleID: $vehicleId');
+        return {
+          'success': true,
+          'vehicleId': vehicleId,
+        };
+      }
+
+      debugPrint('⚠️ Add user vehicle API response not successful: status=${response.statusCode}, success=${responseBody['success']}');
+      debugPrint('⚠️ Error message: ${responseBody['message'] ?? 'Bilinmeyen hata'}');
+      return {
+        'success': false,
+        'message': responseBody['message'] ?? 'Araç eklenirken bir hata oluştu',
+      };
+    } catch (e) {
+      debugPrint('❌ Add user vehicle HTTP hatası: $e');
+      return {
+        'success': false,
+        'message': 'Bağlantı hatası: ${e.toString()}',
+      };
+    }
+  }
+
+  /// Araç tipinin fiyat çarpanını günceller
+  /// Başarılıysa true, başarısızsa false döner
+  /// TypeName değiştirilemez, sadece PriceMultiplier güncellenir
+  Future<bool> updateVehicleType({
+    required int typeId,
+    required double priceMultiplier,
+    required int userId,
+  }) async {
+    try {
+      debugPrint('📡 Calling update vehicle type API: $_updateVehicleTypeApiUrl');
+      
+      final requestBody = {
+        'typeId': typeId,
+        'priceMultiplier': priceMultiplier,
+        'userId': userId,
+      };
+
+      debugPrint('📋 Update vehicle type request body: $requestBody');
+
+      final response = await http.put(
+        Uri.parse(_updateVehicleTypeApiUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(requestBody),
+      );
+
+      debugPrint('📡 Update vehicle type API response: status=${response.statusCode}, body length=${response.body.length}');
+
+      final responseBody = json.decode(response.body);
+
+      if (response.statusCode == 200 && responseBody['success'] == true) {
+        debugPrint('✅ Vehicle type updated successfully');
+        return true;
+      }
+
+      debugPrint('⚠️ Update vehicle type API response not successful: status=${response.statusCode}, success=${responseBody['success']}');
+      debugPrint('⚠️ Error message: ${responseBody['message'] ?? 'Bilinmeyen hata'}');
+      return false;
+    } catch (e) {
+      debugPrint('❌ Update vehicle type HTTP hatası: $e');
+      return false;
+    }
+  }
+
   /// Yolcuyu siler
   /// Başarılıysa true, başarısızsa false döner
   Future<bool> deletePassenger({
@@ -889,11 +1506,13 @@ class AdminService {
 
       debugPrint('📋 Delete passenger request body: $requestBody');
 
-      final response = await http.delete(
-        Uri.parse(_deletePassengerApiUrl),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode(requestBody),
-      );
+      // http.delete() body parametresi desteklemediği için http.Request kullanıyoruz
+      final request = http.Request('DELETE', Uri.parse(_deletePassengerApiUrl));
+      request.headers.addAll({'Content-Type': 'application/json'});
+      request.body = json.encode(requestBody);
+      
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
 
       debugPrint('📡 Delete passenger API response: status=${response.statusCode}, body length=${response.body.length}');
 
@@ -1002,14 +1621,16 @@ class AdminService {
       debugPrint('📡 Calling delete reservation API: $_deleteReservationApiUrl');
       debugPrint('📋 Delete data: reservationId=$reservationId, userId=$userId');
       
-      final response = await http.delete(
-        Uri.parse(_deleteReservationApiUrl),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'reservationId': reservationId,
-          'userId': userId,
-        }),
-      );
+      // http.delete() body parametresi desteklemediği için http.Request kullanıyoruz
+      final request = http.Request('DELETE', Uri.parse(_deleteReservationApiUrl));
+      request.headers.addAll({'Content-Type': 'application/json'});
+      request.body = json.encode({
+        'reservationId': reservationId,
+        'userId': userId,
+      });
+      
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
 
       debugPrint('📡 Delete reservation API response: status=${response.statusCode}');
       debugPrint('📡 Delete reservation API response body (raw): ${response.body}');
@@ -1168,14 +1789,16 @@ class AdminService {
       debugPrint('📡 Calling delete department API: $_deleteDepartmentApiUrl');
       debugPrint('📋 Delete data: departmentId=$departmentId, userId=$userId');
       
-      final response = await http.delete(
-        Uri.parse(_deleteDepartmentApiUrl),
-        headers: {'Content-Type': 'application/json'},
-        body: json.encode({
-          'departmentId': departmentId,
-          'userId': userId,
-        }),
-      );
+      // http.delete() body parametresi desteklemediği için http.Request kullanıyoruz
+      final request = http.Request('DELETE', Uri.parse(_deleteDepartmentApiUrl));
+      request.headers.addAll({'Content-Type': 'application/json'});
+      request.body = json.encode({
+        'departmentId': departmentId,
+        'userId': userId,
+      });
+      
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
 
       debugPrint('📡 Delete department API response: status=${response.statusCode}');
       debugPrint('📡 Delete department API response body (raw): ${response.body}');
@@ -1426,6 +2049,138 @@ class Reservation {
       flightClass: json['FlightClass'] as String?,
       paymentMethod: json['PaymentMethod'] as String?,
       passengerCount: json['PassengerCount'] as int?,
+    );
+  }
+}
+
+/// Kullanıcı Aracı modeli
+class UserVehicle {
+  final int? vehicleId;
+  final String? plateNumber;
+  final int? userId;
+  final String? userName;
+  final String? userEmail;
+  final int? typeId;
+  final String? typeName;
+
+  UserVehicle({
+    this.vehicleId,
+    this.plateNumber,
+    this.userId,
+    this.userName,
+    this.userEmail,
+    this.typeId,
+    this.typeName,
+  });
+
+  factory UserVehicle.fromJson(Map<String, dynamic> json) {
+    return UserVehicle(
+      vehicleId: json['vehicleID'] as int?,
+      plateNumber: json['plateNumber'] as String?,
+      userId: json['userID'] as int?,
+      userName: json['userName'] as String?,
+      userEmail: json['userEmail'] as String?,
+      typeId: json['typeID'] as int?,
+      typeName: json['typeName'] as String?,
+    );
+  }
+
+  Map<String, dynamic> toJson() {
+    return {
+      'vehicleID': vehicleId,
+      'plateNumber': plateNumber,
+      'userID': userId,
+      'userName': userName,
+      'userEmail': userEmail,
+      'typeID': typeId,
+      'typeName': typeName,
+    };
+  }
+}
+
+/// Otopark Alanı modeli
+class ParkingLot {
+  final int? parkingLotId;
+  final int? airportId;
+  final String? lotName;
+  final int? capacity;
+  final String? locationDescription;
+  final String? airportName;
+  final String? airportIATACode;
+  final String? airportCity;
+  final int? occupiedSpots;
+
+  ParkingLot({
+    this.parkingLotId,
+    this.airportId,
+    this.lotName,
+    this.capacity,
+    this.locationDescription,
+    this.airportName,
+    this.airportIATACode,
+    this.airportCity,
+    this.occupiedSpots,
+  });
+
+  factory ParkingLot.fromJson(Map<String, dynamic> json) {
+    return ParkingLot(
+      parkingLotId: json['ParkingLotID'] as int?,
+      airportId: json['AirportID'] as int?,
+      lotName: json['LotName'] as String?,
+      capacity: json['Capacity'] as int?,
+      locationDescription: json['LocationDescription'] as String?,
+      airportName: json['AirportName'] as String?,
+      airportIATACode: json['AirportIATACode'] as String?,
+      airportCity: json['AirportCity'] as String?,
+      occupiedSpots: json['OccupiedSpots'] as int?,
+    );
+  }
+}
+
+/// Park Yeri modeli
+class ParkingSpot {
+  final int? spotId;
+  final int? parkingLotId;
+  final String? spotNumber;
+  final bool? isReserved;
+  final String? parkingLotName;
+  final int? parkingLotCapacity;
+  final String? parkingLotLocation;
+  final int? airportId;
+  final String? airportName;
+  final String? airportIATACode;
+  final String? airportCity;
+  final String? airportDisplayName;
+
+  ParkingSpot({
+    this.spotId,
+    this.parkingLotId,
+    this.spotNumber,
+    this.isReserved,
+    this.parkingLotName,
+    this.parkingLotCapacity,
+    this.parkingLotLocation,
+    this.airportId,
+    this.airportName,
+    this.airportIATACode,
+    this.airportCity,
+    this.airportDisplayName,
+  });
+
+  factory ParkingSpot.fromJson(Map<String, dynamic> json) {
+    return ParkingSpot(
+      spotId: json['SpotID'] as int?,
+      parkingLotId: json['ParkingLotID'] as int?,
+      spotNumber: json['SpotNumber'] as String?,
+      isReserved: json['IsReserved'] as bool?,
+      parkingLotName: json['ParkingLotName'] as String?,
+      parkingLotCapacity: json['ParkingLotCapacity'] as int?,
+      parkingLotLocation: json['ParkingLotLocation'] as String?,
+      airportId: json['AirportID'] as int?,
+      airportName: json['AirportName'] as String?,
+      airportIATACode: json['AirportIATACode'] as String?,
+      airportCity: json['AirportCity'] as String?,
+      airportDisplayName: json['AirportDisplayName'] as String?,
     );
   }
 }

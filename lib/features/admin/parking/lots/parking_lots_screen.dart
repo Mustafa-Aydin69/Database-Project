@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
+import '../../../../core/services/admin_service.dart';
+import '../../../../core/services/auth_service.dart';
 
 class ParkingLotsScreen extends StatefulWidget {
   const ParkingLotsScreen({super.key});
@@ -10,6 +12,9 @@ class ParkingLotsScreen extends StatefulWidget {
 
 class _ParkingLotsScreenState extends State<ParkingLotsScreen> {
   // --- STATE ---
+  final AdminService _adminService = AdminService();
+  bool _isLoading = true;
+  List<ParkingLot> _parkingLots = [];
   int _currentPage = 0;
   final int _itemsPerPage = 8; // Kartlar biraz büyük olabilir, 8 tane yeterli
   String _searchTerm = "";
@@ -22,49 +27,77 @@ class _ParkingLotsScreenState extends State<ParkingLotsScreen> {
   final TextEditingController _capacityController = TextEditingController();
   final TextEditingController _locationController = TextEditingController();
 
-  // Sabit Listeler
-  final List<String> _airports = [
-    'İstanbul Havalimanı (IST)',
-    'Sabiha Gökçen (SAW)',
-    'Antalya Havalimanı (AYT)',
-    'Esenboğa (ESB)'
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _loadParkingLots();
+  }
 
-  // --- MOCK VERİLER (React'ten alındı) ---
-  List<Map<String, dynamic>> _parkingLots = [
-    {'parkingLotID': 1, 'airportName': 'İstanbul Havalimanı (IST)', 'lotName': 'A Terminali Otopark', 'capacity': 500, 'locationDescription': 'Terminal A yanı, kısa süreli park', 'occupiedSpots': 342},
-    {'parkingLotID': 2, 'airportName': 'İstanbul Havalimanı (IST)', 'lotName': 'B Terminali Otopark', 'capacity': 450, 'locationDescription': 'Terminal B yanı, uzun süreli park', 'occupiedSpots': 289},
-    {'parkingLotID': 3, 'airportName': 'Sabiha Gökçen (SAW)', 'lotName': 'Açık Otopark', 'capacity': 300, 'locationDescription': 'Terminal karşısı, ekonomik park', 'occupiedSpots': 156},
-    {'parkingLotID': 4, 'airportName': 'Antalya Havalimanı (AYT)', 'lotName': 'Kapalı Otopark', 'capacity': 600, 'locationDescription': 'Terminal altı, kapalı alan', 'occupiedSpots': 478},
-    // Sayfalama için veri üretelim
-    ...List.generate(10, (index) => {
-      'parkingLotID': 5 + index,
-      'airportName': index % 2 == 0 ? 'Esenboğa (ESB)' : 'Sabiha Gökçen (SAW)',
-      'lotName': 'Otopark ${index + 1}',
-      'capacity': 200 + (index * 50),
-      'locationDescription': 'Bölge ${index + 1}',
-      'occupiedSpots': (50 + index * 10) // Rastgele doluluk
-    }),
-  ];
+  /// API'den otopark alanlarını yükle
+  Future<void> _loadParkingLots() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final parkingLots = await _adminService.getParkingLots();
+      setState(() {
+        _parkingLots = parkingLots;
+        _isLoading = false;
+      });
+    } catch (e) {
+      debugPrint('❌ Error loading parking lots: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  // Havalimanları listesini otoparklardan çıkar (dinamik)
+  List<String> get _airports {
+    final airportSet = <String>{};
+    for (var lot in _parkingLots) {
+      if (lot.airportName != null && lot.airportName!.isNotEmpty) {
+        airportSet.add(lot.airportName!);
+      }
+    }
+    return airportSet.toList()..sort();
+  }
+
+  // Havalimanı adından AirportID'yi bul (parking lots listesinden)
+  int? _getAirportIdByName(String? airportName) {
+    if (airportName == null || airportName.isEmpty) return null;
+    
+    for (var lot in _parkingLots) {
+      if (lot.airportName == airportName && lot.airportId != null) {
+        return lot.airportId;
+      }
+    }
+    return null;
+  }
 
   // --- FİLTRELEME ---
-  List<Map<String, dynamic>> get _filteredLots {
+  List<ParkingLot> get _filteredLots {
     return _parkingLots.where((lot) {
-      final matchesSearch = lot['lotName'].toString().toLowerCase().contains(_searchTerm.toLowerCase()) ||
-          lot['locationDescription'].toString().toLowerCase().contains(_searchTerm.toLowerCase());
-      final matchesFilter = _filterAirport.isEmpty || lot['airportName'] == _filterAirport;
+      final matchesSearch = (lot.lotName?.toLowerCase().contains(_searchTerm.toLowerCase()) ?? false) ||
+          (lot.locationDescription?.toLowerCase().contains(_searchTerm.toLowerCase()) ?? false);
+      final matchesFilter = _filterAirport.isEmpty || lot.airportName == _filterAirport;
       return matchesSearch && matchesFilter;
     }).toList();
   }
 
   // --- CRUD İŞLEMLERİ ---
 
-  void _showLotDialog({Map<String, dynamic>? lot}) {
-    if (lot != null) {
-      _selectedAirport = lot['airportName'];
-      _lotNameController.text = lot['lotName'];
-      _capacityController.text = lot['capacity'].toString();
-      _locationController.text = lot['locationDescription'];
+  void _showLotDialog({ParkingLot? lot}) {
+    // Düzenleme modunda olup olmadığımızı kontrol eden değişken
+    final bool isEditing = lot != null;
+
+    if (isEditing) {
+      final parkingLot = lot; // isEditing true ise lot null değil
+      _selectedAirport = parkingLot.airportName;
+      _lotNameController.text = parkingLot.lotName ?? '';
+      _capacityController.text = parkingLot.capacity?.toString() ?? '0';
+      _locationController.text = parkingLot.locationDescription ?? '';
     } else {
       _selectedAirport = null;
       _lotNameController.clear();
@@ -76,7 +109,7 @@ class _ParkingLotsScreenState extends State<ParkingLotsScreen> {
       context: context,
       builder: (context) => AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-        title: Text(lot != null ? 'Otopark Düzenle' : 'Yeni Otopark'),
+        title: Text(isEditing ? 'Otopark Düzenle' : 'Yeni Otopark'),
         content: SizedBox(
           width: 400,
           child: SingleChildScrollView(
@@ -85,18 +118,31 @@ class _ParkingLotsScreenState extends State<ParkingLotsScreen> {
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
+                  // --- HAVALİMANI (DÜZENLEME MODUNDA KİLİTLİ) ---
                   DropdownButtonFormField<String>(
                     value: _selectedAirport,
-                    decoration: const InputDecoration(labelText: "Havalimanı", border: OutlineInputBorder()),
+                    decoration: InputDecoration(
+                      labelText: "Havalimanı",
+                      border: const OutlineInputBorder(),
+                      filled: isEditing,
+                      fillColor: isEditing ? Colors.grey.shade200 : null,
+                    ),
                     items: _airports.map((a) => DropdownMenuItem(value: a, child: Text(a))).toList(),
-                    onChanged: (val) => setState(() => _selectedAirport = val),
+                    onChanged: isEditing ? null : (val) => setState(() => _selectedAirport = val),
                     validator: (v) => v == null ? "Seçiniz" : null,
                     isExpanded: true,
                   ),
                   const SizedBox(height: 16),
+                  // --- OTOPARK ADI (DÜZENLEME MODUNDA KİLİTLİ) ---
                   TextFormField(
                     controller: _lotNameController,
-                    decoration: const InputDecoration(labelText: "Otopark Adı", border: OutlineInputBorder()),
+                    enabled: !isEditing, // Düzenleme modunda değiştirilemez (disabled)
+                    decoration: InputDecoration(
+                      labelText: "Otopark Adı",
+                      border: const OutlineInputBorder(),
+                      filled: isEditing,
+                      fillColor: isEditing ? Colors.grey.shade200 : null,
+                    ),
                     validator: (v) => v!.isEmpty ? "Zorunlu alan" : null,
                   ),
                   const SizedBox(height: 16),
@@ -124,61 +170,216 @@ class _ParkingLotsScreenState extends State<ParkingLotsScreen> {
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
-            onPressed: () {
+            onPressed: () async {
               if (_formKey.currentState!.validate()) {
-                setState(() {
-                  if (lot != null) {
-                    final index = _parkingLots.indexWhere((l) => l['parkingLotID'] == lot['parkingLotID']);
-                    _parkingLots[index] = {
-                      ..._parkingLots[index],
-                      'airportName': _selectedAirport,
-                      'lotName': _lotNameController.text,
-                      'capacity': int.parse(_capacityController.text),
-                      'locationDescription': _locationController.text,
-                    };
-                  } else {
-                    _parkingLots.insert(0, {
-                      'parkingLotID': DateTime.now().millisecondsSinceEpoch,
-                      'airportName': _selectedAirport,
-                      'lotName': _lotNameController.text,
-                      'capacity': int.parse(_capacityController.text),
-                      'locationDescription': _locationController.text,
-                      'occupiedSpots': 0, // Yeni otopark boş başlar
-                    });
+                if (isEditing) {
+                  // Güncelleme işlemi
+                  final userId = AuthService().currentUserId;
+                  if (userId == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("Kullanıcı kimliği bulunamadı. Lütfen tekrar giriş yapın."),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                    return;
                   }
-                });
-                Navigator.pop(context);
+
+                  final parkingLot = lot; // isEditing true ise lot null değil
+                  final capacity = int.tryParse(_capacityController.text.trim());
+                  
+                  if (capacity == null || capacity <= 0) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("Geçerli bir kapasite giriniz (0'dan büyük olmalı)"),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                    return;
+                  }
+
+                  // Loading dialog göster
+                  if (mounted) {
+                    showDialog(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (loadingContext) => const Center(child: CircularProgressIndicator()),
+                    );
+                  }
+
+                  try {
+                    final success = await _adminService.updateParkingLot(
+                      parkingLotId: parkingLot.parkingLotId!,
+                      capacity: capacity,
+                      locationDescription: _locationController.text.trim().isEmpty 
+                          ? null 
+                          : _locationController.text.trim(),
+                      userId: userId,
+                    );
+
+                    // Loading dialog'u kapat
+                    if (mounted) {
+                      Navigator.of(context, rootNavigator: true).pop();
+                    }
+
+                    if (success) {
+                      // Dialog'u kapat
+                      Navigator.pop(context);
+                      // Başarılı mesajı göster
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text("Otopark alanı başarıyla güncellendi"),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
+                      // Listeyi yenile
+                      _loadParkingLots();
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text("Otopark alanı güncellenirken bir hata oluştu"),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                  } catch (e) {
+                    // Loading dialog'u kapat
+                    if (mounted) {
+                      Navigator.of(context, rootNavigator: true).pop();
+                    }
+                    
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text("Hata: ${e.toString()}"),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                } else {
+                  // Ekleme işlemi
+                  final userId = AuthService().currentUserId;
+                  if (userId == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("Kullanıcı kimliği bulunamadı. Lütfen tekrar giriş yapın."),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                    return;
+                  }
+
+                  // Seçilen havalimanı adından AirportID'yi bul
+                  final airportId = _getAirportIdByName(_selectedAirport);
+                  if (airportId == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("Havalimanı bilgisi bulunamadı. Lütfen geçerli bir havalimanı seçin."),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                    return;
+                  }
+
+                  final capacity = int.tryParse(_capacityController.text.trim());
+                  
+                  if (capacity == null || capacity <= 0) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("Geçerli bir kapasite giriniz (0'dan büyük olmalı)"),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                    return;
+                  }
+
+                  if (_lotNameController.text.trim().isEmpty) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("Otopark adı boş olamaz"),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                    return;
+                  }
+
+                  // Loading dialog göster
+                  if (mounted) {
+                    showDialog(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (loadingContext) => const Center(child: CircularProgressIndicator()),
+                    );
+                  }
+
+                  try {
+                    final result = await _adminService.addParkingLot(
+                      airportId: airportId,
+                      lotName: _lotNameController.text.trim(),
+                      capacity: capacity,
+                      locationDescription: _locationController.text.trim().isEmpty 
+                          ? null 
+                          : _locationController.text.trim(),
+                      userId: userId,
+                    );
+
+                    // Loading dialog'u kapat
+                    if (mounted) {
+                      Navigator.of(context, rootNavigator: true).pop();
+                    }
+
+                    if (result['success'] == true) {
+                      // Dialog'u kapat
+                      Navigator.pop(context);
+                      // Başarılı mesajı göster
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text("Otopark alanı başarıyla eklendi"),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
+                      // Listeyi yenile
+                      _loadParkingLots();
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(
+                          content: Text(result['message'] ?? 'Otopark alanı eklenirken bir hata oluştu'),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                  } catch (e) {
+                    // Loading dialog'u kapat
+                    if (mounted) {
+                      Navigator.of(context, rootNavigator: true).pop();
+                    }
+                    
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text("Hata: ${e.toString()}"),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                }
               }
             },
-            child: Text(lot != null ? "Güncelle" : "Ekle"),
+            child: Text(isEditing ? "Güncelle" : "Ekle"),
           ),
         ],
       ),
     );
   }
 
-  void _deleteLot(int id) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Emin misiniz?"),
-        content: const Text("Bu otopark alanını silmek istediğinizden emin misiniz?"),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
-          TextButton(
-            onPressed: () {
-              setState(() => _parkingLots.removeWhere((l) => l['parkingLotID'] == id));
-              Navigator.pop(context);
-            },
-            child: const Text("Sil", style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: const Color(0xFFF9FAFB),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
     // Sayfalama
     final filtered = _filteredLots;
     final totalPages = (filtered.length / _itemsPerPage).ceil();
@@ -286,7 +487,6 @@ class _ParkingLotsScreenState extends State<ParkingLotsScreen> {
                       return _ParkingLotCard(
                         lot: currentData[index],
                         onEdit: () => _showLotDialog(lot: currentData[index]),
-                        onDelete: () => _deleteLot(currentData[index]['parkingLotID']),
                       );
                     },
                   );
@@ -312,11 +512,10 @@ class _ParkingLotsScreenState extends State<ParkingLotsScreen> {
 
 // --- OTOPARK KARTI ---
 class _ParkingLotCard extends StatelessWidget {
-  final Map<String, dynamic> lot;
+  final ParkingLot lot;
   final VoidCallback onEdit;
-  final VoidCallback onDelete;
 
-  const _ParkingLotCard({required this.lot, required this.onEdit, required this.onDelete});
+  const _ParkingLotCard({required this.lot, required this.onEdit});
 
   Color _getOccupancyColor(double percentage) {
     if (percentage >= 0.9) return Colors.red;
@@ -326,7 +525,9 @@ class _ParkingLotCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final double percentage = lot['occupiedSpots'] / lot['capacity'];
+    final capacity = lot.capacity ?? 1; // Sıfıra bölme hatasını önlemek için
+    final occupied = lot.occupiedSpots ?? 0;
+    final double percentage = capacity > 0 ? occupied / capacity : 0.0;
     final Color progressColor = _getOccupancyColor(percentage);
 
     return Container(
@@ -348,15 +549,15 @@ class _ParkingLotCard extends StatelessWidget {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(lot['lotName'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), overflow: TextOverflow.ellipsis),
-                    Text(lot['airportName'], style: TextStyle(fontSize: 12, color: Colors.grey.shade600), overflow: TextOverflow.ellipsis),
+                    Text(lot.lotName ?? 'N/A', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), overflow: TextOverflow.ellipsis),
+                    Text(lot.airportName ?? 'N/A', style: TextStyle(fontSize: 12, color: Colors.grey.shade600), overflow: TextOverflow.ellipsis),
                   ],
                 ),
               ),
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(color: Colors.blue.shade50, borderRadius: BorderRadius.circular(8)),
-                child: Text("#${lot['parkingLotID']}", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.blue.shade700)),
+                child: Text("#${lot.parkingLotId ?? 'N/A'}", style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: Colors.blue.shade700)),
               ),
             ],
           ),
@@ -367,7 +568,7 @@ class _ParkingLotCard extends StatelessWidget {
             children: [
               const Icon(Icons.map, size: 18, color: Colors.blue),
               const SizedBox(width: 8),
-              Expanded(child: Text(lot['locationDescription'], style: TextStyle(fontSize: 13, color: Colors.grey.shade700), maxLines: 1, overflow: TextOverflow.ellipsis)),
+              Expanded(child: Text(lot.locationDescription ?? 'N/A', style: TextStyle(fontSize: 13, color: Colors.grey.shade700), maxLines: 1, overflow: TextOverflow.ellipsis)),
             ],
           ),
           const SizedBox(height: 12),
@@ -381,7 +582,7 @@ class _ParkingLotCard extends StatelessWidget {
                 children: [
                   const Text("Doluluk", style: TextStyle(fontSize: 12, color: Colors.grey)),
                   Text(
-                    "${lot['occupiedSpots']}/${lot['capacity']} (%${(percentage * 100).toInt()})",
+                    "$occupied/$capacity (%${(percentage * 100).toInt()})",
                     style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: progressColor),
                   ),
                 ],
@@ -405,8 +606,6 @@ class _ParkingLotCard extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
               InkWell(onTap: onEdit, child: const Icon(Icons.edit, size: 20, color: Colors.teal)),
-              const SizedBox(width: 16),
-              InkWell(onTap: onDelete, child: const Icon(Icons.delete_outline, size: 20, color: Colors.red)),
             ],
           ),
         ],
