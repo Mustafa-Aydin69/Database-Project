@@ -120,6 +120,10 @@ class AdminService {
       'http://localhost:3000/api/admin/add-user-vehicle';
   static const String _parkingReservationsApiUrl =
       'http://localhost:3000/api/admin/parking-reservations';
+  static const String _parkingPaymentSummaryApiUrl =
+      'http://localhost:3000/api/admin/parking-payment-summary';
+  static const String _parkingPaymentsApiUrl =
+      'http://localhost:3000/api/admin/parking-payments';
 
   /// Admin dashboard istatistiklerini getirir
   /// Başarılıysa AdminDashboardStats, başarısızsa empty stats döner
@@ -1340,6 +1344,82 @@ class AdminService {
     }
   }
 
+  /// Ödeme özeti istatistiklerini getirir
+  Future<PaymentSummary?> getPaymentSummary() async {
+    try {
+      debugPrint('📡 Calling parking payment summary API: $_parkingPaymentSummaryApiUrl');
+      final response = await http.get(
+        Uri.parse(_parkingPaymentSummaryApiUrl),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      final contentType = response.headers['content-type'] ?? '';
+      if (!contentType.contains('application/json')) {
+        debugPrint('⚠️ Admin parking payment summary API: JSON olmayan response alındı. Status: ${response.statusCode}, Content-Type: $contentType');
+        return null;
+      }
+
+      final responseBody = json.decode(response.body);
+
+      if (response.statusCode == 200 && responseBody['success'] == true) {
+        final data = responseBody['data'] as Map<String, dynamic>?;
+        debugPrint('📥 Admin parking payment summary API: data retrieved');
+        if (data != null) {
+          debugPrint('📋 Payment summary: $data');
+          final summary = PaymentSummary.fromJson(data);
+          debugPrint('✅ Parsed payment summary successfully');
+          return summary;
+        }
+        debugPrint('⚠️ API returned empty data');
+        return PaymentSummary(totalRevenue: 0, totalTransactionCount: 0, averagePayment: 0);
+      }
+
+      debugPrint('⚠️ API response not successful: status=${response.statusCode}, success=${responseBody['success']}');
+      return null;
+    } catch (e) {
+      debugPrint('❌ Admin parking payment summary HTTP hatası: $e');
+      return null;
+    }
+  }
+
+  /// Otopark ödeme detaylarını getirir
+  Future<List<ParkingPaymentDetail>> getParkingPaymentDetails() async {
+    try {
+      debugPrint('📡 Calling parking payments API: $_parkingPaymentsApiUrl');
+      final response = await http.get(
+        Uri.parse(_parkingPaymentsApiUrl),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      final contentType = response.headers['content-type'] ?? '';
+      if (!contentType.contains('application/json')) {
+        debugPrint('⚠️ Admin parking payments API: JSON olmayan response alındı. Status: ${response.statusCode}, Content-Type: $contentType');
+        return [];
+      }
+
+      final responseBody = json.decode(response.body);
+
+      if (response.statusCode == 200 && responseBody['success'] == true) {
+        final data = responseBody['data'] as List<dynamic>?;
+        debugPrint('📥 Admin parking payments API: ${data?.length ?? 0} payments retrieved');
+        if (data != null && data.isNotEmpty) {
+          debugPrint('📋 First payment sample: ${data[0]}');
+          final payments = data.map((item) => ParkingPaymentDetail.fromJson(item as Map<String, dynamic>)).toList();
+          debugPrint('✅ Parsed ${payments.length} payments successfully');
+          return payments;
+        }
+        debugPrint('⚠️ API returned empty data array');
+        return [];
+      }
+
+      debugPrint('⚠️ API response not successful: status=${response.statusCode}, success=${responseBody['success']}');
+      return [];
+    } catch (e) {
+      debugPrint('❌ Admin parking payments HTTP hatası: $e');
+      return [];
+    }
+  }
+
   /// Kullanıcı aracı günceller
   /// Başarılıysa true, başarısızsa false döner
   Future<bool> updateUserVehicle({
@@ -2248,6 +2328,75 @@ class VehicleType {
       typeId: json['TypeID'] as int?,
       typeName: json['TypeName'] as String?,
       priceMultiplier: (json['PriceMultiplier'] as num?)?.toDouble(),
+    );
+  }
+}
+
+/// Ödeme Özeti modeli
+class PaymentSummary {
+  final double totalRevenue;
+  final int totalTransactionCount;
+  final double averagePayment;
+
+  PaymentSummary({
+    required this.totalRevenue,
+    required this.totalTransactionCount,
+    required this.averagePayment,
+  });
+
+  factory PaymentSummary.fromJson(Map<String, dynamic> json) {
+    return PaymentSummary(
+      totalRevenue: (json['totalRevenue'] as num?)?.toDouble() ?? 0.0,
+      totalTransactionCount: json['totalTransactionCount'] as int? ?? 0,
+      averagePayment: (json['averagePayment'] as num?)?.toDouble() ?? 0.0,
+    );
+  }
+}
+
+/// Otopark Ödeme Detayı modeli
+class ParkingPaymentDetail {
+  final String? paymentID;
+  final String? plateNumber;
+  final String? vehicleType;
+  final String? ownerName;
+  final String? spotNumber;
+  final String? checkInTime;
+  final String? checkOutTime;
+  final int? stayDurationMinutes;
+  final int? stayDurationHours;
+  final String? paymentMethod;
+  final String? status;
+  final double amount;
+
+  ParkingPaymentDetail({
+    this.paymentID,
+    this.plateNumber,
+    this.vehicleType,
+    this.ownerName,
+    this.spotNumber,
+    this.checkInTime,
+    this.checkOutTime,
+    this.stayDurationMinutes,
+    this.stayDurationHours,
+    this.paymentMethod,
+    this.status,
+    required this.amount,
+  });
+
+  factory ParkingPaymentDetail.fromJson(Map<String, dynamic> json) {
+    return ParkingPaymentDetail(
+      paymentID: json['paymentID'] as String?,
+      plateNumber: json['plateNumber'] as String?,
+      vehicleType: json['vehicleType'] as String?,
+      ownerName: json['ownerName'] as String?,
+      spotNumber: json['spotNumber'] as String?,
+      checkInTime: json['checkInTime']?.toString(),
+      checkOutTime: json['checkOutTime']?.toString(),
+      stayDurationMinutes: json['stayDurationMinutes'] as int?,
+      stayDurationHours: json['stayDurationHours'] as int?,
+      paymentMethod: json['paymentMethod'] as String?,
+      status: json['status'] as String?,
+      amount: (json['amount'] as num?)?.toDouble() ?? 0.0,
     );
   }
 }

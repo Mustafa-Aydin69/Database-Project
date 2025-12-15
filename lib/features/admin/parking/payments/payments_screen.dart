@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
 import 'package:intl/intl.dart';
+import '../../../../core/services/admin_service.dart';
 
 class PaymentsScreen extends StatefulWidget {
   const PaymentsScreen({super.key});
@@ -11,6 +12,11 @@ class PaymentsScreen extends StatefulWidget {
 
 class _PaymentsScreenState extends State<PaymentsScreen> {
   // --- STATE ---
+  final AdminService _adminService = AdminService();
+  bool _isLoadingStats = true;
+  bool _isLoadingPayments = true;
+  PaymentSummary? _paymentSummary;
+  List<ParkingPaymentDetail> _payments = [];
   int _currentPage = 0;
   final int _itemsPerPage = 10;
   String _searchTerm = "";
@@ -20,56 +26,61 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
   // Sabit Listeler
   final List<String> _paymentMethods = ['Kredi Kartı', 'Nakit', 'Mobil Ödeme', 'Banka Transferi'];
 
-  // --- MOCK VERİLER ---
-  List<Map<String, dynamic>> _payments = [
-    {
-      'parkingPaymentID': 1, 'userName': 'Mehmet Kaya', 'plateNumber': '06 XYZ 456',
-      'spotNumber': 'B-001', 'amount': 156.00, 'paymentMethod': 'Kredi Kartı',
-      'paymentTime': '2024-01-15T14:30:00', 'duration': 28
-    },
-    {
-      'parkingPaymentID': 2, 'userName': 'Ahmet Yılmaz', 'plateNumber': '34 MN 789',
-      'spotNumber': 'B-002', 'amount': 42.00, 'paymentMethod': 'Nakit',
-      'paymentTime': '2024-01-13T18:00:00', 'duration': 6
-    },
-    {
-      'parkingPaymentID': 3, 'userName': 'Fatma Çelik', 'plateNumber': '35 GHI 654',
-      'spotNumber': 'A-005', 'amount': 210.00, 'paymentMethod': 'Kredi Kartı',
-      'paymentTime': '2024-01-14T20:00:00', 'duration': 35
-    },
-    {
-      'parkingPaymentID': 4, 'userName': 'Ali Yıldız', 'plateNumber': '16 JKL 987',
-      'spotNumber': 'C-003', 'amount': 84.00, 'paymentMethod': 'Mobil Ödeme',
-      'paymentTime': '2024-01-15T10:15:00', 'duration': 12
-    },
-    // Sayfalama için veri üretelim
-    ...List.generate(15, (index) => {
-      'parkingPaymentID': 5 + index,
-      'userName': 'User ${index + 1}',
-      'plateNumber': '34 AA ${100 + index}',
-      'spotNumber': 'P-${10 + index}',
-      'amount': (50.0 + index * 10),
-      'paymentMethod': index % 2 == 0 ? 'Kredi Kartı' : 'Nakit',
-      'paymentTime': '2024-01-${16 + index}T12:00:00',
-      'duration': 5 + index
-    }),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _loadData();
+  }
 
-  // --- FİLTRELEME VE HESAPLAMA ---
-  List<Map<String, dynamic>> get _filteredPayments {
+  /// API'den tüm verileri yükle (istatistikler ve ödeme listesi)
+  Future<void> _loadData() async {
+    setState(() {
+      _isLoadingStats = true;
+      _isLoadingPayments = true;
+    });
+
+    try {
+      // İstatistikler ve ödeme listesini paralel yükle
+      final results = await Future.wait([
+        _adminService.getPaymentSummary(),
+        _adminService.getParkingPaymentDetails(),
+      ]);
+
+      final summary = results[0] as PaymentSummary?;
+      final payments = results[1] as List<ParkingPaymentDetail>;
+
+      setState(() {
+        _paymentSummary = summary ?? PaymentSummary(totalRevenue: 0, totalTransactionCount: 0, averagePayment: 0);
+        _payments = payments;
+        _isLoadingStats = false;
+        _isLoadingPayments = false;
+      });
+    } catch (e) {
+      debugPrint('❌ Error loading payments: $e');
+      setState(() {
+        _paymentSummary = PaymentSummary(totalRevenue: 0, totalTransactionCount: 0, averagePayment: 0);
+        _isLoadingStats = false;
+        _isLoadingPayments = false;
+      });
+    }
+  }
+
+  // --- FİLTRELEME ---
+  List<ParkingPaymentDetail> get _filteredPayments {
     return _payments.where((p) {
-      final matchesSearch = p['userName'].toString().toLowerCase().contains(_searchTerm.toLowerCase()) ||
-          p['plateNumber'].toString().toLowerCase().contains(_searchTerm.toLowerCase()) ||
-          p['spotNumber'].toString().toLowerCase().contains(_searchTerm.toLowerCase());
+      final matchesSearch = (p.ownerName?.toLowerCase().contains(_searchTerm.toLowerCase()) ?? false) ||
+          (p.plateNumber?.toLowerCase().contains(_searchTerm.toLowerCase()) ?? false) ||
+          (p.spotNumber?.toLowerCase().contains(_searchTerm.toLowerCase()) ?? false) ||
+          (p.paymentID?.toLowerCase().contains(_searchTerm.toLowerCase()) ?? false);
 
-      final matchesMethod = _filterMethod.isEmpty || p['paymentMethod'] == _filterMethod;
-      final matchesDate = _dateFilter.isEmpty || p['paymentTime'].toString().startsWith(_dateFilter);
+      final matchesMethod = _filterMethod.isEmpty || (p.paymentMethod ?? '').toLowerCase() == _filterMethod.toLowerCase();
+      
+      // Tarih filtresi - checkOutTime'a göre filtrele
+      final matchesDate = _dateFilter.isEmpty || (p.checkOutTime?.toString().startsWith(_dateFilter) ?? false);
 
       return matchesSearch && matchesMethod && matchesDate;
     }).toList();
   }
-
-  double get _totalRevenue => _filteredPayments.fold(0, (sum, item) => sum + (item['amount'] as double));
 
   Future<void> _selectDate(BuildContext context) async {
     final now = DateTime.now();
@@ -103,137 +114,155 @@ class _PaymentsScreenState extends State<PaymentsScreen> {
 
     return Scaffold(
       backgroundColor: const Color(0xFFF9FAFB),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // --- HEADER ---
-            const Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text("Otopark Ödemeleri", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black87)),
-                SizedBox(height: 4),
-                Text("Park ücretlerini ve ödeme geçmişini görüntüleyin", style: TextStyle(color: Colors.grey)),
-              ],
-            ),
+      body: (_isLoadingStats || _isLoadingPayments)
+          ? const Center(child: CircularProgressIndicator())
+          : SingleChildScrollView(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  // --- HEADER ---
+                  const Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text("Otopark Ödemeleri", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black87)),
+                      SizedBox(height: 4),
+                      Text("Park ücretlerini ve ödeme geçmişini görüntüleyin", style: TextStyle(color: Colors.grey)),
+                    ],
+                  ),
 
-            const SizedBox(height: 24),
+                  const SizedBox(height: 24),
 
-            // --- İSTATİSTİK KARTLARI ---
-            Row(
-              children: [
-                Expanded(child: _StatCard(label: "Toplam Gelir", value: currencyFormat.format(_totalRevenue), icon: Icons.attach_money, color: Colors.teal)),
-                const SizedBox(width: 16),
-                Expanded(child: _StatCard(label: "Toplam İşlem", value: "${filtered.length}", icon: Icons.receipt_long, color: Colors.blue)),
-                const SizedBox(width: 16),
-                Expanded(child: _StatCard(
-                    label: "Ortalama",
-                    value: currencyFormat.format(filtered.isEmpty ? 0 : _totalRevenue / filtered.length),
-                    icon: Icons.bar_chart,
-                    color: Colors.orange)
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 24),
-
-            // --- FİLTRELER ---
-            Container(
-              padding: const EdgeInsets.all(16),
-              decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade200)),
-              child: LayoutBuilder(
-                builder: (context, constraints) {
-                  bool isMobile = constraints.maxWidth < 800;
-                  return Flex(
-                    direction: isMobile ? Axis.vertical : Axis.horizontal,
+                  // --- İSTATİSTİK KARTLARI ---
+                  Row(
                     children: [
                       Expanded(
-                        child: TextField(
-                          onChanged: (val) => setState(() => _searchTerm = val),
-                          decoration: const InputDecoration(
-                            hintText: "Kullanıcı, plaka veya park yeri ara...",
-                            prefixIcon: Icon(Icons.search),
-                            border: OutlineInputBorder(),
-                            contentPadding: EdgeInsets.symmetric(horizontal: 12),
-                          ),
+                        child: _StatCard(
+                          label: "Toplam Gelir",
+                          value: _isLoadingStats ? '...' : currencyFormat.format(_paymentSummary?.totalRevenue ?? 0),
+                          icon: Icons.attach_money,
+                          color: Colors.teal,
                         ),
                       ),
-                      SizedBox(width: isMobile ? 0 : 16, height: isMobile ? 16 : 0),
-                      SizedBox(
-                        width: isMobile ? double.infinity : 200,
-                        child: InkWell(
-                          onTap: () => _selectDate(context),
-                          child: InputDecorator(
-                            decoration: InputDecoration(
-                                border: const OutlineInputBorder(),
-                                contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                                suffixIcon: _dateFilter.isNotEmpty
-                                    ? IconButton(icon: const Icon(Icons.clear), onPressed: () => setState(() => _dateFilter = ""))
-                                    : const Icon(Icons.calendar_today)
-                            ),
-                            child: Text(_dateFilter.isEmpty ? "Tarih Seç" : _dateFilter),
-                          ),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: _StatCard(
+                          label: "Toplam İşlem",
+                          value: _isLoadingStats ? '...' : "${_paymentSummary?.totalTransactionCount ?? 0}",
+                          icon: Icons.receipt_long,
+                          color: Colors.blue,
                         ),
                       ),
-                      SizedBox(width: isMobile ? 0 : 16, height: isMobile ? 16 : 0),
-                      SizedBox(
-                        width: isMobile ? double.infinity : 250,
-                        child: DropdownButtonFormField<String>(
-                          value: _filterMethod.isEmpty ? null : _filterMethod,
-                          decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12), hintText: "Tüm Yöntemler"),
-                          items: [
-                            const DropdownMenuItem(value: "", child: Text("Tüm Yöntemler")),
-                            ..._paymentMethods.map((m) => DropdownMenuItem(value: m, child: Text(m))),
-                          ],
-                          onChanged: (val) => setState(() => _filterMethod = val ?? ""),
+                      const SizedBox(width: 16),
+                      Expanded(
+                        child: _StatCard(
+                          label: "Ortalama",
+                          value: _isLoadingStats ? '...' : currencyFormat.format(_paymentSummary?.averagePayment ?? 0),
+                          icon: Icons.bar_chart,
+                          color: Colors.orange,
                         ),
                       ),
                     ],
-                  );
-                },
-              ),
-            ),
+                  ),
 
-            const SizedBox(height: 24),
+                  const SizedBox(height: 24),
 
-            // --- KART LİSTESİ ---
-            if (currentData.isEmpty)
-              const Center(child: Padding(padding: EdgeInsets.all(40), child: Text("Ödeme bulunamadı.")))
-            else
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  int crossAxisCount = constraints.maxWidth > 1100 ? 3 : (constraints.maxWidth > 700 ? 2 : 1);
-                  return GridView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: crossAxisCount,
-                      crossAxisSpacing: 16,
-                      mainAxisSpacing: 16,
-                      childAspectRatio: 1.5,
+                  // --- FİLTRELER ---
+                  Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(color: Colors.white, borderRadius: BorderRadius.circular(12), border: Border.all(color: Colors.grey.shade200)),
+                    child: LayoutBuilder(
+                      builder: (context, constraints) {
+                        bool isMobile = constraints.maxWidth < 800;
+                        return Flex(
+                          direction: isMobile ? Axis.vertical : Axis.horizontal,
+                          children: [
+                            Expanded(
+                              child: TextField(
+                                onChanged: (val) => setState(() => _searchTerm = val),
+                                decoration: const InputDecoration(
+                                  hintText: "Kullanıcı, plaka veya park yeri ara...",
+                                  prefixIcon: Icon(Icons.search),
+                                  border: OutlineInputBorder(),
+                                  contentPadding: EdgeInsets.symmetric(horizontal: 12),
+                                ),
+                              ),
+                            ),
+                            SizedBox(width: isMobile ? 0 : 16, height: isMobile ? 16 : 0),
+                            SizedBox(
+                              width: isMobile ? double.infinity : 200,
+                              child: InkWell(
+                                onTap: () => _selectDate(context),
+                                child: InputDecorator(
+                                  decoration: InputDecoration(
+                                      border: const OutlineInputBorder(),
+                                      contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                                      suffixIcon: _dateFilter.isNotEmpty
+                                          ? IconButton(icon: const Icon(Icons.clear), onPressed: () => setState(() => _dateFilter = ""))
+                                          : const Icon(Icons.calendar_today)
+                                  ),
+                                  child: Text(_dateFilter.isEmpty ? "Tarih Seç" : _dateFilter),
+                                ),
+                              ),
+                            ),
+                            SizedBox(width: isMobile ? 0 : 16, height: isMobile ? 16 : 0),
+                            SizedBox(
+                              width: isMobile ? double.infinity : 250,
+                              child: DropdownButtonFormField<String>(
+                                value: _filterMethod.isEmpty ? null : _filterMethod,
+                                decoration: const InputDecoration(border: OutlineInputBorder(), contentPadding: EdgeInsets.symmetric(horizontal: 12), hintText: "Tüm Yöntemler"),
+                                items: [
+                                  const DropdownMenuItem(value: "", child: Text("Tüm Yöntemler")),
+                                  ..._paymentMethods.map((m) => DropdownMenuItem(value: m, child: Text(m))),
+                                ],
+                                onChanged: (val) => setState(() => _filterMethod = val ?? ""),
+                              ),
+                            ),
+                          ],
+                        );
+                      },
                     ),
-                    itemCount: currentData.length,
-                    itemBuilder: (context, index) {
-                      return _PaymentCard(payment: currentData[index]);
-                    },
-                  );
-                },
-              ),
+                  ),
 
-            // --- SAYFALAMA ---
-            const SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                IconButton(onPressed: _currentPage > 0 ? () => setState(() => _currentPage--) : null, icon: const Icon(Icons.chevron_left)),
-                Text("Sayfa ${_currentPage + 1} / $totalPages"),
-                IconButton(onPressed: _currentPage < totalPages - 1 ? () => setState(() => _currentPage++) : null, icon: const Icon(Icons.chevron_right)),
-              ],
+                  const SizedBox(height: 24),
+
+                  // --- KART LİSTESİ ---
+                  if (currentData.isEmpty)
+                    const Center(child: Padding(padding: EdgeInsets.all(40), child: Text("Ödeme bulunamadı.")))
+                  else
+                    LayoutBuilder(
+                      builder: (context, constraints) {
+                        int crossAxisCount = constraints.maxWidth > 1100 ? 3 : (constraints.maxWidth > 700 ? 2 : 1);
+                        return GridView.builder(
+                          shrinkWrap: true,
+                          physics: const NeverScrollableScrollPhysics(),
+                          gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                            crossAxisCount: crossAxisCount,
+                            crossAxisSpacing: 16,
+                            mainAxisSpacing: 16,
+                            childAspectRatio: 1.5,
+                          ),
+                          itemCount: currentData.length,
+                          itemBuilder: (context, index) {
+                            return _PaymentCard(payment: currentData[index]);
+                          },
+                        );
+                      },
+                    ),
+
+                  // --- SAYFALAMA ---
+                  const SizedBox(height: 20),
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      IconButton(onPressed: _currentPage > 0 ? () => setState(() => _currentPage--) : null, icon: const Icon(Icons.chevron_left)),
+                      Text("Sayfa ${_currentPage + 1} / $totalPages"),
+                      IconButton(onPressed: _currentPage < totalPages - 1 ? () => setState(() => _currentPage++) : null, icon: const Icon(Icons.chevron_right)),
+                    ],
+                  ),
+                ],
+              ),
             ),
-          ],
-        ),
-      ),
     );
   }
 }
@@ -280,17 +309,37 @@ class _StatCard extends StatelessWidget {
 
 // --- ÖDEME KARTI ---
 class _PaymentCard extends StatelessWidget {
-  final Map<String, dynamic> payment;
+  final ParkingPaymentDetail payment;
 
   const _PaymentCard({required this.payment});
 
-  IconData _getMethodIcon(String method) {
-    switch (method) {
-      case 'Kredi Kartı': return Icons.credit_card;
-      case 'Nakit': return Icons.attach_money;
-      case 'Mobil Ödeme': return Icons.smartphone;
-      case 'Banka Transferi': return Icons.account_balance;
-      default: return Icons.wallet;
+  IconData _getMethodIcon(String? method) {
+    if (method == null) return Icons.wallet;
+    switch (method.toLowerCase()) {
+      case 'kredi kartı':
+      case 'credit card':
+        return Icons.credit_card;
+      case 'nakit':
+      case 'cash':
+        return Icons.attach_money;
+      case 'mobil ödeme':
+      case 'mobile payment':
+        return Icons.smartphone;
+      case 'banka transferi':
+      case 'bank transfer':
+        return Icons.account_balance;
+      default:
+        return Icons.wallet;
+    }
+  }
+
+  String _formatDateTime(String? dateTimeString, DateFormat format) {
+    if (dateTimeString == null) return '-';
+    try {
+      final dateTime = DateTime.parse(dateTimeString);
+      return format.format(dateTime);
+    } catch (e) {
+      return dateTimeString;
     }
   }
 
@@ -314,8 +363,17 @@ class _PaymentCard extends StatelessWidget {
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
-              Text(payment['userName'], style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16), overflow: TextOverflow.ellipsis),
-              Text(currencyFormat.format(payment['amount']), style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.teal)),
+              Expanded(
+                child: Text(
+                  payment.ownerName ?? 'Bilinmeyen',
+                  style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              Text(
+                currencyFormat.format(payment.amount),
+                style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.teal),
+              ),
             ],
           ),
 
@@ -325,11 +383,11 @@ class _PaymentCard extends StatelessWidget {
             children: [
               const Icon(Icons.directions_car, size: 16, color: Colors.blue),
               const SizedBox(width: 8),
-              Text(payment['plateNumber'], style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
+              Text(payment.plateNumber ?? '-', style: const TextStyle(fontSize: 13, fontWeight: FontWeight.w600)),
               const SizedBox(width: 16),
               const Icon(Icons.local_parking, size: 16, color: Colors.purple),
               const SizedBox(width: 8),
-              Text(payment['spotNumber'], style: const TextStyle(fontSize: 13)),
+              Text(payment.spotNumber ?? '-', style: const TextStyle(fontSize: 13)),
             ],
           ),
           const SizedBox(height: 8),
@@ -338,16 +396,22 @@ class _PaymentCard extends StatelessWidget {
             children: [
               const Icon(Icons.timer, size: 16, color: Colors.orange),
               const SizedBox(width: 8),
-              Text("${payment['duration']} saat", style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
+              Text(
+                "${payment.stayDurationHours ?? 0} saat",
+                style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+              ),
             ],
           ),
           const SizedBox(height: 8),
 
           Row(
             children: [
-              Icon(_getMethodIcon(payment['paymentMethod']), size: 16, color: Colors.green),
+              Icon(_getMethodIcon(payment.paymentMethod), size: 16, color: Colors.green),
               const SizedBox(width: 8),
-              Text(payment['paymentMethod'], style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
+              Text(
+                payment.paymentMethod ?? '-',
+                style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+              ),
             ],
           ),
           const SizedBox(height: 8),
@@ -356,7 +420,10 @@ class _PaymentCard extends StatelessWidget {
             children: [
               const Icon(Icons.calendar_today, size: 16, color: Colors.red),
               const SizedBox(width: 8),
-              Text(dateFormat.format(DateTime.parse(payment['paymentTime'])), style: TextStyle(fontSize: 13, color: Colors.grey.shade700)),
+              Text(
+                _formatDateTime(payment.checkOutTime, dateFormat),
+                style: TextStyle(fontSize: 13, color: Colors.grey.shade700),
+              ),
             ],
           ),
         ],

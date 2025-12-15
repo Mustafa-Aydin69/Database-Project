@@ -2490,6 +2490,165 @@ router.get('/parking-reservations', async (req, res) => {
 });
 
 /**
+ * GET /api/admin/parking-payment-summary
+ * Ödeme özeti istatistiklerini getirir
+ * AirportParkingSystem.fn_PaymentSummary() function'ını çağırır
+ */
+router.get('/parking-payment-summary', async (req, res) => {
+  console.log('📥 GET /api/admin/parking-payment-summary endpoint called');
+  try {
+    const pool = await getPool();
+    const request = pool.request();
+
+    // Function'ı çağır
+    const result = await request.query(`
+      SELECT * FROM AirportParkingSystem.fn_PaymentSummary()
+    `);
+
+    console.log('🔍 Raw database result count:', result.recordset?.length || 0);
+    if (result.recordset && result.recordset.length > 0) {
+      console.log('🔍 Sample row keys:', Object.keys(result.recordset[0]));
+    }
+
+    if (!result.recordset || result.recordset.length === 0) {
+      console.log('⚠️ No payment summary found in database');
+      return res.json({
+        success: true,
+        data: {
+          totalRevenue: 0,
+          totalTransactionCount: 0,
+          averagePayment: 0
+        }
+      });
+    }
+
+    // Kolon isimlerini normalize et (case-insensitive)
+    const getValue = (obj, ...keys) => {
+      for (const key of keys) {
+        const foundKey = Object.keys(obj).find(k => k.toLowerCase() === key.toLowerCase());
+        if (foundKey && obj[foundKey] != null) {
+          return obj[foundKey];
+        }
+      }
+      return null;
+    };
+
+    const row = result.recordset[0];
+    const totalRevenue = parseFloat(getValue(row, 'TotalRevenue', 'totalRevenue', 'revenue', 'Revenue')) || 0;
+    const totalTransactionCount = parseInt(getValue(row, 'TotalTransactionCount', 'totalTransactionCount', 'count', 'Count', 'TransactionCount', 'transactionCount')) || 0;
+    const averagePayment = parseFloat(getValue(row, 'AveragePayment', 'averagePayment', 'average', 'Average', 'avg', 'Avg')) || 0;
+
+    console.log('✅ Payment summary retrieved:', { totalRevenue, totalTransactionCount, averagePayment });
+
+    res.json({
+      success: true,
+      data: {
+        totalRevenue,
+        totalTransactionCount,
+        averagePayment
+      }
+    });
+  } catch (error) {
+    console.error('❌ Admin parking payment summary error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Sunucu hatası: ' + error.message
+    });
+  }
+});
+
+/**
+ * GET /api/admin/parking-payments
+ * Tüm ödeme detaylarını getirir
+ * AirportParkingSystem.fn_ParkingPaymentDetailList() function'ını çağırır
+ */
+router.get('/parking-payments', async (req, res) => {
+  console.log('📥 GET /api/admin/parking-payments endpoint called');
+  try {
+    const pool = await getPool();
+    const request = pool.request();
+
+    // Function'ı çağır
+    const result = await request.query(`
+      SELECT * FROM AirportParkingSystem.fn_ParkingPaymentDetailList()
+    `);
+
+    console.log('🔍 Raw database result count:', result.recordset?.length || 0);
+    if (result.recordset && result.recordset.length > 0) {
+      console.log('🔍 Sample row keys:', Object.keys(result.recordset[0]));
+    }
+
+    if (!result.recordset || result.recordset.length === 0) {
+      console.log('⚠️ No parking payments found in database');
+      return res.json({
+        success: true,
+        data: []
+      });
+    }
+
+    // Kolon isimlerini normalize et (case-insensitive)
+    const getValue = (obj, ...keys) => {
+      for (const key of keys) {
+        const foundKey = Object.keys(obj).find(k => k.toLowerCase() === key.toLowerCase());
+        if (foundKey && obj[foundKey] != null) {
+          return obj[foundKey];
+        }
+      }
+      return null;
+    };
+
+    // Ödeme listesini map et
+    const payments = result.recordset.map((row) => {
+      const paymentId = getValue(row, 'PaymentID', 'paymentID', 'payment_id', 'PaymentId', 'paymentId');
+      const plateNumber = getValue(row, 'PlateNumber', 'plateNumber', 'plate_number', 'Plate', 'plate');
+      const vehicleType = getValue(row, 'VehicleType', 'vehicleType', 'vehicle_type', 'TypeName', 'typeName');
+      const ownerName = getValue(row, 'OwnerName', 'ownerName', 'owner_name', 'FullName', 'fullName');
+      const spotNumber = getValue(row, 'SpotNumber', 'spotNumber', 'spot_number', 'Number', 'number');
+      const checkInTime = getValue(row, 'CheckInTime', 'checkInTime', 'checkin_time', 'CheckinTime');
+      const checkOutTime = getValue(row, 'CheckOutTime', 'checkOutTime', 'checkout_time', 'CheckoutTime');
+      const stayDurationMinutes = parseInt(getValue(row, 'StayDurationMinutes', 'stayDurationMinutes', 'stay_duration_minutes', 'Duration', 'duration', 'Minutes', 'minutes')) || 0;
+      const paymentMethod = getValue(row, 'PaymentMethod', 'paymentMethod', 'payment_method', 'Method', 'method');
+      const status = getValue(row, 'Status', 'status');
+      const amount = parseFloat(getValue(row, 'Amount', 'amount')) || 0;
+
+      // Kalış süresini saat olarak hesapla
+      const stayDurationHours = Math.round(stayDurationMinutes / 60);
+
+      return {
+        paymentID: paymentId || null,
+        plateNumber: plateNumber || null,
+        vehicleType: vehicleType || null,
+        ownerName: ownerName || null,
+        spotNumber: spotNumber || null,
+        checkInTime: checkInTime || null,
+        checkOutTime: checkOutTime || null,
+        stayDurationMinutes: stayDurationMinutes,
+        stayDurationHours: stayDurationHours,
+        paymentMethod: paymentMethod || null,
+        status: status || null,
+        amount: amount,
+      };
+    });
+
+    console.log('✅ Parking payments retrieved:', payments.length, 'payments');
+    if (payments.length > 0) {
+      console.log('📋 Sample payment:', JSON.stringify(payments[0], null, 2));
+    }
+
+    res.json({
+      success: true,
+      data: payments
+    });
+  } catch (error) {
+    console.error('❌ Admin parking payments error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Sunucu hatası: ' + error.message
+    });
+  }
+});
+
+/**
  * PUT /api/admin/update-parking-spot
  * Park yerini günceller (sadece IsReserved)
  * AirportParkingSystem.UpdateParkingSpot stored procedure'ünü çağırır
