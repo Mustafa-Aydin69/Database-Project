@@ -2649,6 +2649,897 @@ router.get('/parking-payments', async (req, res) => {
 });
 
 /**
+ * GET /api/admin/users
+ * Tüm kullanıcıları getirir (Customer hariç)
+ * GeneralCommon.fn_GetAllUsers() function'ını çağırır
+ */
+router.get('/users', async (req, res) => {
+  console.log('📥 GET /api/admin/users endpoint called');
+  try {
+    const pool = await getPool();
+    const request = pool.request();
+
+    // Function'ı çağır
+    const result = await request.query(`
+      SELECT * FROM GeneralCommon.fn_GetAllUsers()
+    `);
+
+    console.log('🔍 Raw database result count:', result.recordset?.length || 0);
+    if (result.recordset && result.recordset.length > 0) {
+      console.log('🔍 Sample row keys:', Object.keys(result.recordset[0]));
+    }
+
+    if (!result.recordset || result.recordset.length === 0) {
+      console.log('⚠️ No users found in database');
+      return res.json({
+        success: true,
+        data: []
+      });
+    }
+
+    // Kolon isimlerini normalize et (case-insensitive)
+    const getValue = (obj, ...keys) => {
+      for (const key of keys) {
+        const foundKey = Object.keys(obj).find(k => k.toLowerCase() === key.toLowerCase());
+        if (foundKey && obj[foundKey] != null) {
+          return obj[foundKey];
+        }
+      }
+      return null;
+    };
+
+    // Kullanıcı listesini map et
+    const users = result.recordset.map((row) => {
+      const userId = getValue(row, 'UserID', 'userID', 'user_id', 'UserId', 'userId', 'ID', 'Id', 'id');
+      const fullName = getValue(row, 'FullName', 'fullName', 'full_name', 'Name', 'name');
+      const email = getValue(row, 'Email', 'email');
+      const phone = getValue(row, 'Phone', 'phone');
+      const roleName = getValue(row, 'RoleName', 'roleName', 'role_name', 'Role', 'role');
+
+      return {
+        id: userId || null,
+        fullName: fullName || null,
+        email: email || null,
+        phone: phone || null,
+        roleName: roleName || null,
+      };
+    });
+
+    console.log('✅ Users retrieved:', users.length, 'users');
+    if (users.length > 0) {
+      console.log('📋 Sample user:', JSON.stringify(users[0], null, 2));
+    }
+
+    res.json({
+      success: true,
+      data: users
+    });
+  } catch (error) {
+    console.error('❌ Admin users error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Sunucu hatası: ' + error.message
+    });
+  }
+});
+
+/**
+ * GET /api/admin/roles
+ * Tüm roller'i getirir
+ * GeneralCommon.fn_GetAllRoles() function'ını çağırır
+ */
+router.get('/roles', async (req, res) => {
+  console.log('📥 GET /api/admin/roles endpoint called');
+  try {
+    const pool = await getPool();
+    const request = pool.request();
+
+    // Function'ı çağır
+    const result = await request.query(`
+      SELECT * FROM GeneralCommon.fn_GetAllRoles()
+    `);
+
+    console.log('🔍 Raw database result count:', result.recordset?.length || 0);
+    if (result.recordset && result.recordset.length > 0) {
+      console.log('🔍 Sample row keys:', Object.keys(result.recordset[0]));
+    }
+
+    if (!result.recordset || result.recordset.length === 0) {
+      console.log('⚠️ No roles found in database');
+      return res.json({
+        success: true,
+        data: []
+      });
+    }
+
+    // Kolon isimlerini normalize et (case-insensitive)
+    const getValue = (obj, ...keys) => {
+      for (const key of keys) {
+        const foundKey = Object.keys(obj).find(k => k.toLowerCase() === key.toLowerCase());
+        if (foundKey && obj[foundKey] != null) {
+          return obj[foundKey];
+        }
+      }
+      return null;
+    };
+
+    // Rol listesini map et
+    const roles = result.recordset.map((row) => {
+      const roleId = getValue(row, 'RoleID', 'roleID', 'role_id', 'RoleId', 'roleId', 'ID', 'Id', 'id');
+      const roleName = getValue(row, 'RoleName', 'roleName', 'role_name', 'Role', 'role', 'Name', 'name');
+      const description = getValue(row, 'Description', 'description', 'desc', 'Desc');
+
+      return {
+        id: roleId || null,
+        roleName: roleName || null,
+        description: description || null,
+      };
+    });
+
+    console.log('✅ Roles retrieved:', roles.length, 'roles');
+    if (roles.length > 0) {
+      console.log('📋 Sample role:', JSON.stringify(roles[0], null, 2));
+    }
+
+    res.json({
+      success: true,
+      data: roles
+    });
+  } catch (error) {
+    console.error('❌ Admin roles error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Sunucu hatası: ' + error.message
+    });
+  }
+});
+
+/**
+ * PUT /api/admin/update-seat
+ * Koltuk bilgilerini günceller (sadece ClassID değiştirilebilir)
+ * FlightReservationSystem.UpdateSeat stored procedure'ünü çağırır
+ */
+router.put('/update-seat', async (req, res) => {
+  console.log('📥 PUT /api/admin/update-seat endpoint called');
+  console.log('📋 Request body:', JSON.stringify(req.body, null, 2));
+
+  try {
+    const {
+      seatId,
+      className,
+      userId
+    } = req.body;
+
+    if (!seatId || !className || !userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Eksik parametreler: seatId, className ve userId zorunludur.'
+      });
+    }
+
+    const pool = await getPool();
+
+    // ClassName'den ClassID'yi bul
+    const classRequest = pool.request();
+    classRequest.input('ClassName', sql.NVarChar(50), className.trim());
+    const classResult = await classRequest.query(`
+      SELECT ClassID 
+      FROM FlightReservationSystem.Flight_Classes 
+      WHERE ClassName = @ClassName
+    `);
+
+    if (!classResult.recordset || classResult.recordset.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Geçersiz sınıf adı: ' + className
+      });
+    }
+
+    const classId = classResult.recordset[0].ClassID;
+
+    // Stored procedure'ü çağır (sadece SeatID, ClassID ve UserID gönderiliyor)
+    const spRequest = pool.request();
+    spRequest.input('SeatID', sql.Int, seatId);
+    spRequest.input('ClassID', sql.Int, classId);
+    spRequest.input('UserID', sql.Int, userId);
+
+    await spRequest.execute('FlightReservationSystem.UpdateSeat');
+
+    console.log(`✅ Seat ${seatId} updated successfully (ClassID: ${classId}) by user ${userId}`);
+    res.json({
+      success: true,
+      message: 'Koltuk başarıyla güncellendi'
+    });
+
+  } catch (error) {
+    console.error('❌ Update seat error:', error);
+
+    // SQL Server'dan gelen hata mesajını yakala
+    let errorMessage = 'Sunucu hatası: ' + (error.message || error.toString());
+    
+    if (error.message && typeof error.message === 'string') {
+      const message = error.message;
+      if (message.includes('Koltuk bulunamadı')) {
+        errorMessage = 'Koltuk bulunamadı.';
+      } else if (message.includes('FOREIGN KEY constraint')) {
+        errorMessage = 'Geçersiz sınıf seçimi.';
+      }
+    }
+
+    res.status(500).json({
+      success: false,
+      message: errorMessage
+    });
+  }
+});
+
+/**
+ * PUT /api/admin/update-role
+ * Rol bilgilerini günceller
+ * GeneralCommon.UpdateRoleWithLog stored procedure'ünü çağırır
+ */
+router.put('/update-role', async (req, res) => {
+  console.log('📥 PUT /api/admin/update-role endpoint called');
+  console.log('📋 Request body:', JSON.stringify(req.body, null, 2));
+
+  try {
+    const {
+      roleId,
+      roleName,
+      description,
+      adminUserId
+    } = req.body;
+
+    if (!roleId || !roleName || !description || !adminUserId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Eksik parametreler: roleId, roleName, description ve adminUserId zorunludur.'
+      });
+    }
+
+    const pool = await getPool();
+    const request = pool.request();
+
+    request.input('RoleID', sql.Int, roleId);
+    request.input('RoleName', sql.NVarChar(50), roleName.trim());
+    request.input('Description', sql.NVarChar(255), description.trim());
+    request.input('AdminUserID', sql.Int, adminUserId);
+
+    // Stored procedure'ü çağır
+    await request.execute('GeneralCommon.UpdateRoleWithLog');
+
+    console.log(`✅ Role ${roleId} updated successfully by admin ${adminUserId}`);
+    res.json({
+      success: true,
+      message: 'Rol başarıyla güncellendi'
+    });
+
+  } catch (error) {
+    console.error('❌ Update role error:', error);
+
+    // SQL Server'dan gelen hata mesajını yakala
+    let errorMessage = 'Sunucu hatası: ' + (error.message || error.toString());
+    
+    // RAISERROR mesajlarını yakala
+    if (error.message && typeof error.message === 'string') {
+      const message = error.message;
+      if (message.includes('Rol bulunamadı')) {
+        errorMessage = 'Rol bulunamadı.';
+      } else if (message.includes('UNIQUE KEY constraint') || message.includes('duplicate')) {
+        errorMessage = 'Bu rol adı zaten kullanılıyor.';
+      } else if (message.includes('FOREIGN KEY constraint')) {
+        errorMessage = 'Bu rol kullanıldığı için silinemez veya güncellenemez.';
+      }
+    }
+
+    res.status(500).json({
+      success: false,
+      message: errorMessage
+    });
+  }
+});
+
+/**
+ * POST /api/admin/add-role
+ * Yeni rol ekler
+ * GeneralCommon.CreateRoleWithLog stored procedure'ünü çağırır
+ */
+router.post('/add-role', async (req, res) => {
+  console.log('📥 POST /api/admin/add-role endpoint called');
+  console.log('📋 Request body:', JSON.stringify(req.body, null, 2));
+
+  try {
+    const {
+      roleName,
+      description,
+      adminUserId
+    } = req.body;
+
+    if (!roleName || !description || !adminUserId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Eksik parametreler: roleName, description ve adminUserId zorunludur.'
+      });
+    }
+
+    const pool = await getPool();
+    const request = pool.request();
+
+    request.input('RoleName', sql.NVarChar(50), roleName.trim());
+    request.input('Description', sql.NVarChar(255), description.trim());
+    request.input('AdminUserID', sql.Int, adminUserId);
+
+    // Stored procedure'ü çağır
+    await request.execute('GeneralCommon.CreateRoleWithLog');
+
+    console.log(`✅ Role "${roleName}" added successfully by admin ${adminUserId}`);
+    res.json({
+      success: true,
+      message: 'Rol başarıyla eklendi'
+    });
+
+  } catch (error) {
+    console.error('❌ Add role error:', error);
+
+    // SQL Server'dan gelen hata mesajını yakala
+    let errorMessage = 'Sunucu hatası: ' + (error.message || error.toString());
+    
+    // RAISERROR mesajlarını yakala
+    if (error.message && typeof error.message === 'string') {
+      const message = error.message;
+      if (message.includes('Bu rol zaten mevcut')) {
+        errorMessage = 'Bu rol zaten mevcut.';
+      } else if (message.includes('UNIQUE KEY constraint') || message.includes('duplicate')) {
+        errorMessage = 'Bu rol adı zaten kullanılıyor.';
+      }
+    }
+
+    res.status(500).json({
+      success: false,
+      message: errorMessage
+    });
+  }
+});
+
+/**
+ * POST /api/admin/add-seat
+ * Yeni koltuk ekler
+ * FlightReservationSystem.AddSeat stored procedure'ünü çağırır
+ */
+router.post('/add-seat', async (req, res) => {
+  console.log('📥 POST /api/admin/add-seat endpoint called');
+  console.log('📋 Request body:', JSON.stringify(req.body, null, 2));
+
+  try {
+    const {
+      aircraftModel,
+      seatNumber,
+      className,
+      userId
+    } = req.body;
+
+    if (!aircraftModel || !seatNumber || !className || !userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Eksik parametreler: aircraftModel, seatNumber, className ve userId zorunludur.'
+      });
+    }
+
+    const pool = await getPool();
+
+    // AircraftModel'den AircraftID'yi bul
+    const aircraftRequest = pool.request();
+    aircraftRequest.input('Model', sql.NVarChar(100), aircraftModel.trim());
+    const aircraftResult = await aircraftRequest.query(`
+      SELECT AircraftID 
+      FROM FlightReservationSystem.Aircrafts 
+      WHERE Model = @Model
+    `);
+
+    if (!aircraftResult.recordset || aircraftResult.recordset.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Geçersiz uçak modeli: ' + aircraftModel
+      });
+    }
+
+    const aircraftId = aircraftResult.recordset[0].AircraftID;
+
+    // ClassName'den ClassID'yi bul
+    const classRequest = pool.request();
+    classRequest.input('ClassName', sql.NVarChar(100), className.trim());
+    const classResult = await classRequest.query(`
+      SELECT ClassID 
+      FROM FlightReservationSystem.Flight_Classes 
+      WHERE ClassName = @ClassName
+    `);
+
+    if (!classResult.recordset || classResult.recordset.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Geçersiz sınıf adı: ' + className
+      });
+    }
+
+    const classId = classResult.recordset[0].ClassID;
+
+    // Stored procedure'ü çağır
+    const spRequest = pool.request();
+    spRequest.input('AircraftID', sql.Int, aircraftId);
+    spRequest.input('SeatNumber', sql.NVarChar(10), seatNumber.trim());
+    spRequest.input('ClassID', sql.Int, classId);
+    spRequest.input('UserID', sql.Int, userId);
+
+    await spRequest.execute('FlightReservationSystem.AddSeat');
+
+    console.log(`✅ Seat "${seatNumber}" added successfully (AircraftID: ${aircraftId}, ClassID: ${classId}) by user ${userId}`);
+    res.json({
+      success: true,
+      message: 'Koltuk başarıyla eklendi'
+    });
+
+  } catch (error) {
+    console.error('❌ Add seat error:', error);
+
+    // SQL Server'dan gelen hata mesajını yakala
+    let errorMessage = 'Sunucu hatası: ' + (error.message || error.toString());
+    
+    if (error.message && typeof error.message === 'string') {
+      const message = error.message;
+      if (message.includes('UNIQUE KEY constraint') || message.includes('duplicate')) {
+        errorMessage = 'Bu koltuk numarası bu uçak için zaten mevcut.';
+      } else if (message.includes('FOREIGN KEY constraint')) {
+        errorMessage = 'Geçersiz uçak veya sınıf seçimi.';
+      }
+    }
+
+    res.status(500).json({
+      success: false,
+      message: errorMessage
+    });
+  }
+});
+
+/**
+ * POST /api/admin/add-seat
+ * Yeni koltuk ekler
+ * FlightReservationSystem.AddSeat stored procedure'ünü çağırır
+ */
+router.post('/add-seat', async (req, res) => {
+  console.log('📥 POST /api/admin/add-seat endpoint called');
+  console.log('📋 Request body:', JSON.stringify(req.body, null, 2));
+
+  try {
+    const {
+      aircraftModel,
+      seatNumber,
+      className,
+      userId
+    } = req.body;
+
+    if (!aircraftModel || !seatNumber || !className || !userId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Eksik parametreler: aircraftModel, seatNumber, className ve userId zorunludur.'
+      });
+    }
+
+    const pool = await getPool();
+
+    // AircraftModel'den AircraftID'yi bul
+    const aircraftRequest = pool.request();
+    aircraftRequest.input('Model', sql.NVarChar(100), aircraftModel.trim());
+    const aircraftResult = await aircraftRequest.query(`
+      SELECT AircraftID 
+      FROM FlightReservationSystem.Aircrafts 
+      WHERE Model = @Model
+    `);
+
+    if (!aircraftResult.recordset || aircraftResult.recordset.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Geçersiz uçak modeli: ' + aircraftModel
+      });
+    }
+
+    const aircraftId = aircraftResult.recordset[0].AircraftID;
+
+    // ClassName'den ClassID'yi bul
+    const classRequest = pool.request();
+    classRequest.input('ClassName', sql.NVarChar(100), className.trim());
+    const classResult = await classRequest.query(`
+      SELECT ClassID 
+      FROM FlightReservationSystem.Flight_Classes 
+      WHERE ClassName = @ClassName
+    `);
+
+    if (!classResult.recordset || classResult.recordset.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Geçersiz sınıf adı: ' + className
+      });
+    }
+
+    const classId = classResult.recordset[0].ClassID;
+
+    // Stored procedure'ü çağır
+    const spRequest = pool.request();
+    spRequest.input('AircraftID', sql.Int, aircraftId);
+    spRequest.input('SeatNumber', sql.NVarChar(10), seatNumber.trim());
+    spRequest.input('ClassID', sql.Int, classId);
+    spRequest.input('UserID', sql.Int, userId);
+
+    await spRequest.execute('FlightReservationSystem.AddSeat');
+
+    console.log(`✅ Seat "${seatNumber}" added successfully (AircraftID: ${aircraftId}, ClassID: ${classId}) by user ${userId}`);
+    res.json({
+      success: true,
+      message: 'Koltuk başarıyla eklendi'
+    });
+
+  } catch (error) {
+    console.error('❌ Add seat error:', error);
+
+    // SQL Server'dan gelen hata mesajını yakala
+    let errorMessage = 'Sunucu hatası: ' + (error.message || error.toString());
+    
+    if (error.message && typeof error.message === 'string') {
+      const message = error.message;
+      if (message.includes('UNIQUE KEY constraint') || message.includes('duplicate')) {
+        errorMessage = 'Bu koltuk numarası bu uçakta zaten mevcut.';
+      } else if (message.includes('FOREIGN KEY constraint')) {
+        errorMessage = 'Geçersiz uçak veya sınıf seçimi.';
+      }
+    }
+
+    res.status(500).json({
+      success: false,
+      message: errorMessage
+    });
+  }
+});
+
+/**
+ * DELETE /api/admin/delete-role
+ * Rolü siler
+ * GeneralCommon.DeleteRoleWithLog stored procedure'ünü çağırır
+ */
+router.delete('/delete-role', async (req, res) => {
+  console.log('📥 DELETE /api/admin/delete-role endpoint called');
+  console.log('📋 Request body:', JSON.stringify(req.body, null, 2));
+
+  try {
+    const {
+      roleId,
+      adminUserId
+    } = req.body;
+
+    if (!roleId || !adminUserId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Eksik parametreler: roleId ve adminUserId zorunludur.'
+      });
+    }
+
+    const pool = await getPool();
+    const request = pool.request();
+
+    request.input('RoleID', sql.Int, roleId);
+    request.input('AdminUserID', sql.Int, adminUserId);
+
+    // Stored procedure'ü çağır
+    await request.execute('GeneralCommon.DeleteRoleWithLog');
+
+    console.log(`✅ Role ${roleId} deleted successfully by admin ${adminUserId}`);
+    res.json({
+      success: true,
+      message: 'Rol başarıyla silindi'
+    });
+
+  } catch (error) {
+    console.error('❌ Delete role error:', error);
+
+    // SQL Server'dan gelen hata mesajını yakala
+    let errorMessage = 'Sunucu hatası: ' + (error.message || error.toString());
+    
+    // RAISERROR mesajlarını yakala
+    if (error.message && typeof error.message === 'string') {
+      const message = error.message;
+      if (message.includes('Bu role atanmış kullanıcılar var')) {
+        errorMessage = 'Bu role atanmış kullanıcılar var. Silinemez.';
+      } else if (message.includes('FOREIGN KEY constraint')) {
+        errorMessage = 'Bu role atanmış kullanıcılar var. Silinemez.';
+      }
+    }
+
+    res.status(500).json({
+      success: false,
+      message: errorMessage
+    });
+  }
+});
+
+/**
+ * GET /api/admin/seats
+ * Tüm koltukları getirir
+ * FlightReservationSystem.fn_GetSeats() function'ını çağırır
+ */
+router.get('/seats', async (req, res) => {
+  console.log('📥 GET /api/admin/seats endpoint called');
+  try {
+    const pool = await getPool();
+    const request = pool.request();
+
+    // Function'ı çağır
+    const result = await request.query(`
+      SELECT * FROM FlightReservationSystem.fn_GetSeats()
+    `);
+
+    console.log('🔍 Raw database result count:', result.recordset?.length || 0);
+    if (result.recordset && result.recordset.length > 0) {
+      console.log('🔍 Sample row keys:', Object.keys(result.recordset[0]));
+    }
+
+    if (!result.recordset || result.recordset.length === 0) {
+      console.log('⚠️ No seats found in database');
+      return res.json({
+        success: true,
+        data: []
+      });
+    }
+
+    // Kolon isimlerini normalize et (case-insensitive)
+    const getValue = (obj, ...keys) => {
+      for (const key of keys) {
+        const foundKey = Object.keys(obj).find(k => k.toLowerCase() === key.toLowerCase());
+        if (foundKey && obj[foundKey] != null) {
+          return obj[foundKey];
+        }
+      }
+      return null;
+    };
+
+    // Koltuk listesini map et
+    const seats = result.recordset.map((row) => {
+      const seatId = getValue(row, 'SeatID', 'seatID', 'seat_id', 'SeatId', 'seatId', 'ID', 'Id', 'id');
+      const seatNumber = getValue(row, 'SeatNumber', 'seatNumber', 'seat_number', 'Seat', 'seat', 'Number', 'number');
+      const aircraftId = getValue(row, 'AircraftID', 'aircraftID', 'aircraft_id', 'AircraftId', 'aircraftId');
+      const aircraftModel = getValue(row, 'AircraftModel', 'aircraftModel', 'aircraft_model', 'Model', 'model');
+      const classId = getValue(row, 'ClassID', 'classID', 'class_id', 'ClassId', 'classId');
+      const className = getValue(row, 'ClassName', 'className', 'class_name', 'Class', 'class', 'Name', 'name');
+
+      return {
+        seatID: seatId || null,
+        seatNumber: seatNumber || null,
+        aircraftID: aircraftId || null,
+        aircraftModel: aircraftModel || null,
+        classID: classId || null,
+        className: className || null,
+      };
+    });
+
+    console.log('✅ Seats retrieved:', seats.length, 'seats');
+    if (seats.length > 0) {
+      console.log('📋 Sample seat:', JSON.stringify(seats[0], null, 2));
+    }
+
+    res.json({
+      success: true,
+      data: seats
+    });
+  } catch (error) {
+    console.error('❌ Admin seats error:', error);
+    res.status(500).json({
+      success: false,
+      message: 'Sunucu hatası: ' + error.message
+    });
+  }
+});
+
+/**
+ * PUT /api/admin/update-user
+ * Kullanıcı bilgilerini günceller
+ * GeneralCommon.UpdateUserWithLog stored procedure'ünü çağırır
+ */
+router.put('/update-user', async (req, res) => {
+  console.log('📥 PUT /api/admin/update-user endpoint called');
+  console.log('📋 Request body:', JSON.stringify(req.body, null, 2));
+
+  try {
+    const {
+      userId,
+      fullName,
+      email,
+      phone,
+      roleName,
+      password,
+      adminUserId
+    } = req.body;
+
+    if (!userId || !fullName || !email || !roleName || !adminUserId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Eksik parametreler: userId, fullName, email, roleName ve adminUserId zorunludur.'
+      });
+    }
+
+    const pool = await getPool();
+    const request = pool.request();
+
+    // RoleName'den RoleID'yi bul (SQL injection önlemi için parameterized query)
+    const roleLookupRequest = pool.request();
+    roleLookupRequest.input('RoleName', sql.NVarChar(50), roleName);
+    const roleResult = await roleLookupRequest.query(`
+      SELECT RoleID FROM GeneralCommon.Roles WHERE RoleName = @RoleName
+    `);
+
+    if (!roleResult.recordset || roleResult.recordset.length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: 'Geçersiz rol adı: ' + roleName
+      });
+    }
+
+    const roleId = roleResult.recordset[0].RoleID;
+
+    // Stored procedure'ü çağır
+    const spRequest = pool.request();
+    spRequest.input('UserID', sql.Int, userId);
+    spRequest.input('FullName', sql.NVarChar(100), fullName.trim());
+    spRequest.input('Email', sql.NVarChar(100), email.trim());
+    spRequest.input('Phone', sql.NVarChar(20), phone?.trim() || null);
+    spRequest.input('RoleID', sql.Int, roleId);
+    spRequest.input('Password', sql.NVarChar(255), password && password.trim() !== '' ? password.trim() : null);
+    spRequest.input('AdminUserID', sql.Int, adminUserId);
+
+    await spRequest.execute('GeneralCommon.UpdateUserWithLog');
+
+    console.log(`✅ User ${userId} updated successfully by admin ${adminUserId}`);
+    res.json({
+      success: true,
+      message: 'Kullanıcı başarıyla güncellendi'
+    });
+
+  } catch (error) {
+    console.error('❌ Update user error:', error);
+
+    let errorMessage = 'Sunucu hatası: ' + error.message;
+    if (error.message && error.message.includes('Kullanıcı bulunamadı')) {
+      errorMessage = 'Kullanıcı bulunamadı.';
+    } else if (error.message && error.message.includes('email başka bir kullanıcı tarafından kullanılıyor')) {
+      errorMessage = 'Bu email başka bir kullanıcı tarafından kullanılıyor.';
+    }
+
+    res.status(500).json({
+      success: false,
+      message: errorMessage
+    });
+  }
+});
+
+/**
+ * POST /api/admin/add-user
+ * Yeni kullanıcı ekler
+ * GeneralCommon.CreateUserWithLog stored procedure'ünü çağırır
+ */
+router.post('/add-user', async (req, res) => {
+  console.log('📥 POST /api/admin/add-user endpoint called');
+  console.log('📋 Request body:', JSON.stringify(req.body, null, 2));
+
+  try {
+    const {
+      fullName,
+      email,
+      phone,
+      password,
+      roleName,
+      currentUserId
+    } = req.body;
+
+    if (!fullName || !email || !password || !roleName || !currentUserId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Eksik parametreler: fullName, email, password, roleName ve currentUserId zorunludur.'
+      });
+    }
+
+    const pool = await getPool();
+
+    // Stored procedure'ü çağır
+    const request = pool.request();
+    request.input('FullName', sql.NVarChar(100), fullName.trim());
+    request.input('Email', sql.NVarChar(100), email.trim());
+    request.input('Phone', sql.NVarChar(20), phone?.trim() || null);
+    request.input('Password', sql.NVarChar(250), password.trim());
+    request.input('RoleName', sql.NVarChar(50), roleName);
+    request.input('CurrentUserID', sql.Int, currentUserId);
+
+    const result = await request.execute('GeneralCommon.CreateUserWithLog');
+
+    // Procedure'den dönen NewID'yi al
+    const newUserId = result.recordset?.[0]?.NewID || null;
+
+    console.log(`✅ User added successfully. NewUserID: ${newUserId}, by admin ${currentUserId}`);
+    res.json({
+      success: true,
+      message: 'Kullanıcı başarıyla eklendi',
+      data: {
+        userId: newUserId
+      }
+    });
+
+  } catch (error) {
+    console.error('❌ Add user error:', error);
+
+    let errorMessage = 'Sunucu hatası: ' + error.message;
+    if (error.message && error.message.includes('Gecersiz Rol Ismi Girildi')) {
+      errorMessage = 'Geçersiz rol adı.';
+    } else if (error.message && error.message.includes('duplicate key') || error.message.includes('UNIQUE constraint')) {
+      errorMessage = 'Bu email adresi zaten kullanılıyor.';
+    }
+
+    res.status(500).json({
+      success: false,
+      message: errorMessage
+    });
+  }
+});
+
+/**
+ * DELETE /api/admin/delete-user
+ * Kullanıcıyı siler
+ * GeneralCommon.DeleteUserWithLog stored procedure'ünü çağırır
+ */
+router.delete('/delete-user', async (req, res) => {
+  console.log('📥 DELETE /api/admin/delete-user endpoint called');
+  console.log('📋 Request body:', JSON.stringify(req.body, null, 2));
+
+  try {
+    const {
+      deletedUserId,
+      adminUserId
+    } = req.body;
+
+    if (!deletedUserId || !adminUserId) {
+      return res.status(400).json({
+        success: false,
+        message: 'Eksik parametreler: deletedUserId ve adminUserId zorunludur.'
+      });
+    }
+
+    const pool = await getPool();
+
+    // Stored procedure'ü çağır
+    const request = pool.request();
+    request.input('DeletedUserID', sql.Int, deletedUserId);
+    request.input('AdminUserID', sql.Int, adminUserId);
+
+    await request.execute('GeneralCommon.DeleteUserWithLog');
+
+    console.log(`✅ User ${deletedUserId} deleted successfully by admin ${adminUserId}`);
+    res.json({
+      success: true,
+      message: 'Kullanıcı başarıyla silindi'
+    });
+
+  } catch (error) {
+    console.error('❌ Delete user error:', error);
+
+    let errorMessage = 'Sunucu hatası: ' + error.message;
+    if (error.message && error.message.includes('Kullanıcı bulunamadı')) {
+      errorMessage = 'Kullanıcı bulunamadı.';
+    } else if (error.message && error.message.includes('FOREIGN KEY constraint')) {
+      errorMessage = 'Bu kullanıcıya ait kayıtlar bulunduğu için silinemez.';
+    }
+
+    res.status(500).json({
+      success: false,
+      message: errorMessage
+    });
+  }
+});
+
+/**
  * PUT /api/admin/update-parking-spot
  * Park yerini günceller (sadece IsReserved)
  * AirportParkingSystem.UpdateParkingSpot stored procedure'ünü çağırır

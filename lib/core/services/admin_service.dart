@@ -124,6 +124,28 @@ class AdminService {
       'http://localhost:3000/api/admin/parking-payment-summary';
   static const String _parkingPaymentsApiUrl =
       'http://localhost:3000/api/admin/parking-payments';
+  static const String _usersApiUrl =
+      'http://localhost:3000/api/admin/users';
+  static const String _updateUserApiUrl =
+      'http://localhost:3000/api/admin/update-user';
+  static const String _addUserApiUrl =
+      'http://localhost:3000/api/admin/add-user';
+  static const String _deleteUserApiUrl =
+      'http://localhost:3000/api/admin/delete-user';
+  static const String _rolesApiUrl =
+      'http://localhost:3000/api/admin/roles';
+  static const String _updateRoleApiUrl =
+      'http://localhost:3000/api/admin/update-role';
+  static const String _addRoleApiUrl =
+      'http://localhost:3000/api/admin/add-role';
+  static const String _deleteRoleApiUrl =
+      'http://localhost:3000/api/admin/delete-role';
+  static const String _seatsApiUrl =
+      'http://localhost:3000/api/admin/seats';
+  static const String _updateSeatApiUrl =
+      'http://localhost:3000/api/admin/update-seat';
+  static const String _addSeatApiUrl =
+      'http://localhost:3000/api/admin/add-seat';
 
   /// Admin dashboard istatistiklerini getirir
   /// Başarılıysa AdminDashboardStats, başarısızsa empty stats döner
@@ -1420,6 +1442,459 @@ class AdminService {
     }
   }
 
+  /// Kullanıcıları getirir (Customer hariç)
+  Future<List<AdminUser>> getUsers() async {
+    try {
+      debugPrint('📡 Calling users API: $_usersApiUrl');
+      final response = await http.get(
+        Uri.parse(_usersApiUrl),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      final contentType = response.headers['content-type'] ?? '';
+      if (!contentType.contains('application/json')) {
+        debugPrint('⚠️ Admin users API: JSON olmayan response alındı. Status: ${response.statusCode}, Content-Type: $contentType');
+        return [];
+      }
+
+      final responseBody = json.decode(response.body);
+
+      if (response.statusCode == 200 && responseBody['success'] == true) {
+        final data = responseBody['data'] as List<dynamic>?;
+        debugPrint('📥 Admin users API: ${data?.length ?? 0} users retrieved');
+        if (data != null && data.isNotEmpty) {
+          debugPrint('📋 First user sample: ${data[0]}');
+          final users = data.map((item) => AdminUser.fromJson(item as Map<String, dynamic>)).toList();
+          debugPrint('✅ Parsed ${users.length} users successfully');
+          return users;
+        }
+        debugPrint('⚠️ API returned empty data array');
+        return [];
+      }
+
+      debugPrint('⚠️ API response not successful: status=${response.statusCode}, success=${responseBody['success']}');
+      return [];
+    } catch (e) {
+      debugPrint('❌ Admin users HTTP hatası: $e');
+      return [];
+    }
+  }
+
+  /// Koltuk bilgilerini günceller (sadece ClassID değiştirilebilir)
+  /// Başarılıysa true, başarısızsa exception fırlatır (mesaj ile birlikte)
+  Future<bool> updateSeat({
+    required int seatId,
+    required String className,
+    required int userId,
+  }) async {
+    try {
+      debugPrint('📡 Calling update seat API: $_updateSeatApiUrl');
+
+      final requestBody = {
+        'seatId': seatId,
+        'className': className.trim(),
+        'userId': userId,
+      };
+
+      debugPrint('📋 Update seat request body: $requestBody');
+
+      final response = await http.put(
+        Uri.parse(_updateSeatApiUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(requestBody),
+      );
+
+      debugPrint('📡 Update seat API response: status=${response.statusCode}');
+
+      final responseBody = json.decode(response.body);
+
+      if (response.statusCode == 200 && responseBody['success'] == true) {
+        debugPrint('✅ Seat updated successfully');
+        return true;
+      }
+
+      final errorMessage = responseBody['message'] ?? 'Koltuk güncellenirken bir hata oluştu';
+      debugPrint('⚠️ Update seat API response not successful: status=${response.statusCode}, message=$errorMessage');
+      throw Exception(errorMessage);
+    } catch (e) {
+      debugPrint('❌ Update seat HTTP hatası: $e');
+      if (e is Exception) {
+        rethrow; // Exception'ı yeniden fırlat (mesaj ile birlikte)
+      }
+      throw Exception('Bağlantı hatası: ${e.toString()}');
+    }
+  }
+
+  /// Tüm koltukları getirir
+  /// Başarılıysa Seat listesi döner, hata durumunda boş liste döner
+  Future<List<Seat>> getSeats() async {
+    try {
+      debugPrint('📡 Calling seats API: $_seatsApiUrl');
+      final response = await http.get(
+        Uri.parse(_seatsApiUrl),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      final contentType = response.headers['content-type'] ?? '';
+      if (!contentType.contains('application/json')) {
+        debugPrint('⚠️ Admin seats API: JSON olmayan response alındı. Status: ${response.statusCode}, Content-Type: $contentType');
+        return [];
+      }
+
+      final responseBody = json.decode(response.body);
+
+      if (response.statusCode == 200 && responseBody['success'] == true) {
+        final data = responseBody['data'] as List<dynamic>?;
+        debugPrint('📥 Admin seats API: ${data?.length ?? 0} seats retrieved');
+        if (data != null && data.isNotEmpty) {
+          debugPrint('📋 First seat sample: ${data[0]}');
+          final seats = data.map((item) => Seat.fromJson(item as Map<String, dynamic>)).toList();
+          debugPrint('✅ Parsed ${seats.length} seats successfully');
+          return seats;
+        }
+        debugPrint('⚠️ API returned empty data array');
+        return [];
+      }
+
+      debugPrint('⚠️ API response not successful: status=${response.statusCode}, success=${responseBody['success']}');
+      return [];
+    } catch (e) {
+      debugPrint('❌ Admin seats HTTP hatası: $e');
+      return [];
+    }
+  }
+
+  /// Tüm roller'i getirir
+  /// Başarılıysa AdminRole listesi döner, hata durumunda boş liste döner
+  Future<List<AdminRole>> getRoles() async {
+    try {
+      debugPrint('📡 Calling roles API: $_rolesApiUrl');
+      final response = await http.get(
+        Uri.parse(_rolesApiUrl),
+        headers: {'Content-Type': 'application/json'},
+      );
+
+      final contentType = response.headers['content-type'] ?? '';
+      if (!contentType.contains('application/json')) {
+        debugPrint('⚠️ Admin roles API: JSON olmayan response alındı. Status: ${response.statusCode}, Content-Type: $contentType');
+        return [];
+      }
+
+      final responseBody = json.decode(response.body);
+
+      if (response.statusCode == 200 && responseBody['success'] == true) {
+        final data = responseBody['data'] as List<dynamic>?;
+        debugPrint('📥 Admin roles API: ${data?.length ?? 0} roles retrieved');
+        if (data != null && data.isNotEmpty) {
+          debugPrint('📋 First role sample: ${data[0]}');
+          final roles = data.map((item) => AdminRole.fromJson(item as Map<String, dynamic>)).toList();
+          debugPrint('✅ Parsed ${roles.length} roles successfully');
+          return roles;
+        }
+        debugPrint('⚠️ API returned empty data array');
+        return [];
+      }
+
+      debugPrint('⚠️ API response not successful: status=${response.statusCode}, success=${responseBody['success']}');
+      return [];
+    } catch (e) {
+      debugPrint('❌ Admin roles HTTP hatası: $e');
+      return [];
+    }
+  }
+
+  /// Rol bilgilerini günceller
+  /// Başarılıysa true, başarısızsa exception fırlatır (mesaj ile birlikte)
+  Future<bool> updateRole({
+    required int roleId,
+    required String roleName,
+    required String description,
+    required int adminUserId,
+  }) async {
+    try {
+      debugPrint('📡 Calling update role API: $_updateRoleApiUrl');
+
+      final requestBody = {
+        'roleId': roleId,
+        'roleName': roleName.trim(),
+        'description': description.trim(),
+        'adminUserId': adminUserId,
+      };
+
+      debugPrint('📋 Update role request body: $requestBody');
+
+      final response = await http.put(
+        Uri.parse(_updateRoleApiUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(requestBody),
+      );
+
+      debugPrint('📡 Update role API response: status=${response.statusCode}');
+
+      final responseBody = json.decode(response.body);
+
+      if (response.statusCode == 200 && responseBody['success'] == true) {
+        debugPrint('✅ Role updated successfully');
+        return true;
+      }
+
+      final errorMessage = responseBody['message'] ?? 'Rol güncellenirken bir hata oluştu';
+      debugPrint('⚠️ Update role API response not successful: status=${response.statusCode}, message=$errorMessage');
+      throw Exception(errorMessage);
+    } catch (e) {
+      debugPrint('❌ Update role HTTP hatası: $e');
+      if (e is Exception) {
+        rethrow; // Exception'ı yeniden fırlat (mesaj ile birlikte)
+      }
+      throw Exception('Bağlantı hatası: ${e.toString()}');
+    }
+  }
+
+  /// Yeni rol ekler
+  /// Başarılıysa true, başarısızsa exception fırlatır (mesaj ile birlikte)
+  Future<bool> addRole({
+    required String roleName,
+    required String description,
+    required int adminUserId,
+  }) async {
+    try {
+      debugPrint('📡 Calling add role API: $_addRoleApiUrl');
+
+      final requestBody = {
+        'roleName': roleName.trim(),
+        'description': description.trim(),
+        'adminUserId': adminUserId,
+      };
+
+      debugPrint('📋 Add role request body: $requestBody');
+
+      final response = await http.post(
+        Uri.parse(_addRoleApiUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(requestBody),
+      );
+
+      debugPrint('📡 Add role API response: status=${response.statusCode}');
+
+      final responseBody = json.decode(response.body);
+
+      if (response.statusCode == 200 && responseBody['success'] == true) {
+        debugPrint('✅ Role added successfully');
+        return true;
+      }
+
+      final errorMessage = responseBody['message'] ?? 'Rol eklenirken bir hata oluştu';
+      debugPrint('⚠️ Add role API response not successful: status=${response.statusCode}, message=$errorMessage');
+      throw Exception(errorMessage);
+    } catch (e) {
+      debugPrint('❌ Add role HTTP hatası: $e');
+      if (e is Exception) {
+        rethrow; // Exception'ı yeniden fırlat (mesaj ile birlikte)
+      }
+      throw Exception('Bağlantı hatası: ${e.toString()}');
+    }
+  }
+
+  /// Rolü siler
+  /// Başarılıysa true, başarısızsa exception fırlatır (mesaj ile birlikte)
+  Future<bool> deleteRole({
+    required int roleId,
+    required int adminUserId,
+  }) async {
+    try {
+      debugPrint('📡 Calling delete role API: $_deleteRoleApiUrl');
+
+      // http.delete() body parametresi desteklemediği için http.Request kullanıyoruz
+      final request = http.Request('DELETE', Uri.parse(_deleteRoleApiUrl));
+      request.headers.addAll({'Content-Type': 'application/json'});
+      request.body = json.encode({
+        'roleId': roleId,
+        'adminUserId': adminUserId,
+      });
+      
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      debugPrint('📡 Delete role API response: status=${response.statusCode}');
+
+      // Response body'nin JSON olup olmadığını kontrol et
+      final contentType = response.headers['content-type'] ?? '';
+      if (!contentType.contains('application/json')) {
+        debugPrint('⚠️ Admin delete role API: JSON olmayan response alındı. Status: ${response.statusCode}, Content-Type: $contentType');
+        throw Exception('Beklenmeyen yanıt formatı');
+      }
+
+      final responseBody = json.decode(response.body);
+
+      if (response.statusCode == 200 && responseBody['success'] == true) {
+        debugPrint('✅ Role deleted successfully');
+        return true;
+      }
+
+      final errorMessage = responseBody['message'] ?? 'Rol silinirken bir hata oluştu';
+      debugPrint('⚠️ Delete role API response not successful: status=${response.statusCode}, message=$errorMessage');
+      throw Exception(errorMessage);
+    } catch (e) {
+      debugPrint('❌ Delete role HTTP hatası: $e');
+      if (e is Exception) {
+        rethrow; // Exception'ı yeniden fırlat (mesaj ile birlikte)
+      }
+      throw Exception('Bağlantı hatası: ${e.toString()}');
+    }
+  }
+
+  /// Kullanıcı bilgilerini günceller
+  /// Başarılıysa true, başarısızsa false döner
+  Future<bool> updateUser({
+    required int userId,
+    required String fullName,
+    required String email,
+    String? phone,
+    required String roleName,
+    String? password,
+    required int adminUserId,
+  }) async {
+    try {
+      debugPrint('📡 Calling update user API: $_updateUserApiUrl');
+
+      final requestBody = {
+        'userId': userId,
+        'fullName': fullName.trim(),
+        'email': email.trim(),
+        'phone': phone?.trim(),
+        'roleName': roleName,
+        'password': password?.trim(),
+        'adminUserId': adminUserId,
+      };
+
+      debugPrint('📋 Update user request body: $requestBody');
+
+      final response = await http.put(
+        Uri.parse(_updateUserApiUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(requestBody),
+      );
+
+      debugPrint('📡 Update user API response: status=${response.statusCode}, body length=${response.body.length}');
+
+      final responseBody = json.decode(response.body);
+
+      if (response.statusCode == 200 && responseBody['success'] == true) {
+        debugPrint('✅ User updated successfully');
+        return true;
+      }
+
+      debugPrint('⚠️ Update user API response not successful: status=${response.statusCode}, success=${responseBody['success']}');
+      debugPrint('⚠️ Error message: ${responseBody['message'] ?? 'Bilinmeyen hata'}');
+      return false;
+    } catch (e) {
+      debugPrint('❌ Update user HTTP hatası: $e');
+      return false;
+    }
+  }
+
+  /// Yeni kullanıcı ekler
+  /// Başarılıysa Map<String, dynamic> (success: true, userId: int) döner, başarısızsa Map (success: false, message: string) döner
+  Future<Map<String, dynamic>> addUser({
+    required String fullName,
+    required String email,
+    String? phone,
+    required String password,
+    required String roleName,
+    required int currentUserId,
+  }) async {
+    try {
+      debugPrint('📡 Calling add user API: $_addUserApiUrl');
+
+      final requestBody = {
+        'fullName': fullName.trim(),
+        'email': email.trim(),
+        'phone': phone?.trim(),
+        'password': password.trim(),
+        'roleName': roleName,
+        'currentUserId': currentUserId,
+      };
+
+      debugPrint('📋 Add user request body: $requestBody');
+
+      final response = await http.post(
+        Uri.parse(_addUserApiUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(requestBody),
+      );
+
+      debugPrint('📡 Add user API response: status=${response.statusCode}, body length=${response.body.length}');
+
+      final responseBody = json.decode(response.body);
+
+      if (response.statusCode == 200 && responseBody['success'] == true) {
+        final userId = responseBody['data']?['userId'];
+        debugPrint('✅ User added successfully. NewUserID: $userId');
+        return {
+          'success': true,
+          'userId': userId,
+        };
+      }
+
+      debugPrint('⚠️ Add user API response not successful: status=${response.statusCode}, success=${responseBody['success']}');
+      debugPrint('⚠️ Error message: ${responseBody['message'] ?? 'Bilinmeyen hata'}');
+      return {
+        'success': false,
+        'message': responseBody['message'] ?? 'Kullanıcı eklenirken bir hata oluştu',
+      };
+    } catch (e) {
+      debugPrint('❌ Add user HTTP hatası: $e');
+      return {
+        'success': false,
+        'message': 'Bağlantı hatası: ${e.toString()}',
+      };
+    }
+  }
+
+  /// Kullanıcıyı siler
+  /// Başarılıysa true, başarısızsa false döner
+  Future<bool> deleteUser({
+    required int deletedUserId,
+    required int adminUserId,
+  }) async {
+    try {
+      debugPrint('📡 Calling delete user API: $_deleteUserApiUrl');
+
+      // http.delete() body parametresi desteklemediği için http.Request kullanıyoruz
+      final request = http.Request('DELETE', Uri.parse(_deleteUserApiUrl));
+      request.headers.addAll({'Content-Type': 'application/json'});
+      request.body = json.encode({
+        'deletedUserId': deletedUserId,
+        'adminUserId': adminUserId,
+      });
+      
+      final streamedResponse = await request.send();
+      final response = await http.Response.fromStream(streamedResponse);
+
+      debugPrint('📡 Delete user API response: status=${response.statusCode}');
+
+      // Response body'nin JSON olup olmadığını kontrol et
+      final contentType = response.headers['content-type'] ?? '';
+      if (!contentType.contains('application/json')) {
+        debugPrint('⚠️ Admin delete user API: JSON olmayan response alındı. Status: ${response.statusCode}, Content-Type: $contentType');
+        return false;
+      }
+
+      final responseBody = json.decode(response.body);
+
+      if (response.statusCode == 200 && responseBody['success'] == true) {
+        debugPrint('✅ User deleted successfully');
+        return true;
+      } else {
+        debugPrint('⚠️ Delete user API response not successful: status=${response.statusCode}, message=${responseBody['message']}');
+        return false;
+      }
+    } catch (e) {
+      debugPrint('❌ Admin delete user HTTP hatası: $e');
+      return false;
+    }
+  }
+
   /// Kullanıcı aracı günceller
   /// Başarılıysa true, başarısızsa false döner
   Future<bool> updateUserVehicle({
@@ -2398,6 +2873,116 @@ class ParkingPaymentDetail {
       status: json['status'] as String?,
       amount: (json['amount'] as num?)?.toDouble() ?? 0.0,
     );
+  }
+}
+
+/// Admin Kullanıcı modeli (Customer hariç)
+class AdminUser {
+  final int? id;
+  final String? fullName;
+  final String? email;
+  final String? phone;
+  final String? roleName;
+
+  AdminUser({
+    this.id,
+    this.fullName,
+    this.email,
+    this.phone,
+    this.roleName,
+  });
+
+  factory AdminUser.fromJson(Map<String, dynamic> json) {
+    return AdminUser(
+      id: json['id'] as int?,
+      fullName: json['fullName'] as String?,
+      email: json['email'] as String?,
+      phone: json['phone'] as String?,
+      roleName: json['roleName'] as String?,
+    );
+  }
+
+  /// Map formatına dönüştür (UI için)
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'fullName': fullName,
+      'email': email,
+      'phone': phone,
+      'roleName': roleName,
+    };
+  }
+}
+
+/// Koltuk modeli
+class Seat {
+  final int? seatID;
+  final String? seatNumber;
+  final int? aircraftID;
+  final String? aircraftModel;
+  final int? classID;
+  final String? className;
+
+  Seat({
+    this.seatID,
+    this.seatNumber,
+    this.aircraftID,
+    this.aircraftModel,
+    this.classID,
+    this.className,
+  });
+
+  factory Seat.fromJson(Map<String, dynamic> json) {
+    return Seat(
+      seatID: json['seatID'] as int?,
+      seatNumber: json['seatNumber'] as String?,
+      aircraftID: json['aircraftID'] as int?,
+      aircraftModel: json['aircraftModel'] as String?,
+      classID: json['classID'] as int?,
+      className: json['className'] as String?,
+    );
+  }
+
+  /// Map formatına dönüştür (UI için)
+  Map<String, dynamic> toMap() {
+    return {
+      'seatID': seatID,
+      'seatNumber': seatNumber,
+      'aircraftID': aircraftID,
+      'aircraftModel': aircraftModel,
+      'classID': classID,
+      'className': className,
+    };
+  }
+}
+
+/// Admin Rol modeli
+class AdminRole {
+  final int? id;
+  final String? roleName;
+  final String? description;
+
+  AdminRole({
+    this.id,
+    this.roleName,
+    this.description,
+  });
+
+  factory AdminRole.fromJson(Map<String, dynamic> json) {
+    return AdminRole(
+      id: json['id'] as int?,
+      roleName: json['roleName'] as String?,
+      description: json['description'] as String?,
+    );
+  }
+
+  /// Map formatına dönüştür (UI için)
+  Map<String, dynamic> toMap() {
+    return {
+      'id': id,
+      'roleName': roleName,
+      'description': description,
+    };
   }
 }
 
