@@ -55,4 +55,50 @@ class AirlinesApi {
     }
     throw last ?? Exception('Failed to update airline.');
   }
+
+  static Future<Airline> addAirline({
+    required String name,
+    required String country,
+    required String contact,
+  }) async {
+    Exception? last;
+    for (final base in _candidates) {
+      try {
+        final url = base;
+        final res = await http.post(url, headers: {'Content-Type': 'application/json'}, body: json.encode({
+          'name': name,
+          'country': country,
+          'contact': contact,
+        }));
+        if (res.statusCode == 200) {
+          final body = json.decode(res.body) as Map<String, dynamic>;
+          final data = body['data'] as Map<String, dynamic>;
+          return Airline.fromJson(data);
+        } else {
+          last = Exception('HTTP ${res.statusCode}: ${res.body}');
+        }
+      } catch (e) {
+        last = Exception('Network error: $e');
+      }
+    }
+    throw last ?? Exception('Failed to add airline.');
+  }
+
+  static Future<void> deleteAirline(int airlineId) async {
+    Exception? last;
+    for (final base in _candidates) {
+      try {
+        final url = Uri.parse('${base.toString()}/$airlineId');
+        final res = await http.delete(url);
+        if (res.statusCode == 200) {
+          return;
+        } else {
+          last = Exception('HTTP ${res.statusCode}: ${res.body}');
+        }
+      } catch (e) {
+        last = Exception('Network error: $e');
+      }
+    }
+    throw last ?? Exception('Failed to delete airline.');
+  }
 }

@@ -19,6 +19,31 @@ router.get('/airlines', async (req, res) => {
   }
 });
 
+router.post('/airlines', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const name = (req.body?.name ?? '').toString();
+    const country = (req.body?.country ?? '').toString();
+    const contact = (req.body?.contact ?? '').toString();
+    const request = pool.request();
+    request.input('Name', sql.NVarChar(100), name);
+    request.input('Country', sql.NVarChar(100), country);
+    request.input('Contact', sql.NVarChar(50), contact);
+    const result = await request.execute('FlightReservationSystem.usp_AddAirline');
+    const row = (result.recordset && result.recordset[0]) || {};
+    const data = {
+      airlineId: parseInt(row.AirlineID ?? row.airlineId ?? 0) || 0,
+      name: row.Name ?? row.name ?? name,
+      country: row.Country ?? row.country ?? country,
+      contact: row.Contact ?? row.contact ?? contact,
+    };
+    return res.status(200).json({ success: true, data });
+  } catch (err) {
+    console.error('Admin add airline error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to add airline.' });
+  }
+});
+
 module.exports = router;
 
 // Update airline
@@ -47,5 +72,20 @@ router.put('/airlines/:id', async (req, res) => {
   } catch (err) {
     console.error('Admin update airline error:', err);
     return res.status(500).json({ success: false, message: 'Failed to update airline.' });
+  }
+});
+
+router.delete('/airlines/:id', async (req, res) => {
+  try {
+    const pool = await getPool();
+    const idRaw = req.params.id;
+    const airlineId = parseInt(idRaw);
+    const request = pool.request();
+    request.input('AirlineID', sql.Int, airlineId);
+    await request.execute('FlightReservationSystem.usp_DeleteAirlineCascade');
+    return res.status(200).json({ success: true, data: { airlineId } });
+  } catch (err) {
+    console.error('Admin delete airline error:', err);
+    return res.status(500).json({ success: false, message: 'Failed to delete airline.' });
   }
 });

@@ -29,6 +29,7 @@ class _AirlinesScreenState extends State<AirlinesScreen> {
   // --- CRUD İŞLEMLERİ ---
 
   void _showAirlineDialog({Airline? airline}) {
+    bool _saving = false;
     if (airline != null) {
       _nameController.text = airline.name;
       _countryController.text = airline.country;
@@ -43,29 +44,45 @@ class _AirlinesScreenState extends State<AirlinesScreen> {
       context: context,
       builder: (context) => StatefulBuilder(
         builder: (context, setDialogState) {
-          bool _saving = false;
           Future<void> _submit() async {
             if (!_formKey.currentState!.validate()) return;
             setDialogState(() => _saving = true);
             try {
-              final updated = await AirlinesApi.updateAirline(
-                airlineId: airline!.airlineId,
-                name: _nameController.text.trim(),
-                country: _countryController.text.trim(),
-                contact: _contactController.text.trim(),
-              );
-              final idx = _items.indexWhere((a) => a.airlineId == updated.airlineId);
-              if (idx >= 0) {
+              if (airline == null) {
+                final created = await AirlinesApi.addAirline(
+                  name: _nameController.text.trim(),
+                  country: _countryController.text.trim(),
+                  contact: _contactController.text.trim(),
+                );
                 setState(() {
-                  _items[idx] = updated;
+                  _items.insert(0, created);
                 });
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Havayolu eklendi.')));
+              } else {
+                final updated = await AirlinesApi.updateAirline(
+                  airlineId: airline.airlineId,
+                  name: _nameController.text.trim(),
+                  country: _countryController.text.trim(),
+                  contact: _contactController.text.trim(),
+                );
+                final idx = _items.indexWhere((a) => a.airlineId == updated.airlineId);
+                if (idx >= 0) {
+                  setState(() {
+                    _items[idx] = updated;
+                  });
+                }
+                Navigator.pop(context);
               }
-              Navigator.pop(context);
             } catch (e) {
               setDialogState(() => _saving = false);
               ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Güncelleme başarısız: $e')));
             }
           }
+          final canSubmit = !_saving &&
+              _nameController.text.trim().isNotEmpty &&
+              _countryController.text.trim().isNotEmpty &&
+              _contactController.text.trim().isNotEmpty;
           return AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(airline != null ? 'Havayolu Düzenle' : 'Yeni Havayolu'),
@@ -85,6 +102,7 @@ class _AirlinesScreenState extends State<AirlinesScreen> {
                       prefixIcon: Icon(Icons.flight),
                     ),
                     validator: (v) => v!.isEmpty ? "Zorunlu alan" : null,
+                    onChanged: (_) => setDialogState(() {}),
                   ),
                   const SizedBox(height: 16),
                   TextFormField(
@@ -95,6 +113,7 @@ class _AirlinesScreenState extends State<AirlinesScreen> {
                       prefixIcon: Icon(Icons.public),
                     ),
                     validator: (v) => v!.isEmpty ? "Zorunlu alan" : null,
+                    onChanged: (_) => setDialogState(() {}),
                   ),
                   const SizedBox(height: 16),
                   TextFormField(
@@ -105,6 +124,7 @@ class _AirlinesScreenState extends State<AirlinesScreen> {
                       prefixIcon: Icon(Icons.phone),
                     ),
                     validator: (v) => v!.isEmpty ? "Zorunlu alan" : null,
+                    onChanged: (_) => setDialogState(() {}),
                   ),
                 ],
               ),
@@ -118,7 +138,7 @@ class _AirlinesScreenState extends State<AirlinesScreen> {
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
-            onPressed: _saving || airline == null ? null : _submit,
+            onPressed: canSubmit ? _submit : null,
             child: _saving ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : Text(airline != null ? "Güncelle" : "Ekle"),
           ),
         ],
@@ -137,9 +157,17 @@ class _AirlinesScreenState extends State<AirlinesScreen> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
           TextButton(
-            onPressed: () {
-              // TODO: Admin delete airline
+            onPressed: () async {
               Navigator.pop(context);
+              try {
+                await AirlinesApi.deleteAirline(id);
+                setState(() {
+                  _items.removeWhere((a) => a.airlineId == id);
+                });
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Havayolu silindi')));
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Silme başarısız: $e')));
+              }
             },
             child: const Text("Sil", style: TextStyle(color: Colors.red)),
           ),
