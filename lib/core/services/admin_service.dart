@@ -1525,6 +1525,53 @@ class AdminService {
     }
   }
 
+  /// Yeni koltuk ekler
+  /// Başarılıysa true, başarısızsa exception fırlatır (mesaj ile birlikte)
+  Future<bool> addSeat({
+    required String aircraftModel,
+    required String seatNumber,
+    required String className,
+    required int userId,
+  }) async {
+    try {
+      debugPrint('📡 Calling add seat API: $_addSeatApiUrl');
+
+      final requestBody = {
+        'aircraftModel': aircraftModel.trim(),
+        'seatNumber': seatNumber.trim(),
+        'className': className.trim(),
+        'userId': userId,
+      };
+
+      debugPrint('📋 Add seat request body: $requestBody');
+
+      final response = await http.post(
+        Uri.parse(_addSeatApiUrl),
+        headers: {'Content-Type': 'application/json'},
+        body: json.encode(requestBody),
+      );
+
+      debugPrint('📡 Add seat API response: status=${response.statusCode}');
+
+      final responseBody = json.decode(response.body);
+
+      if (response.statusCode == 200 && responseBody['success'] == true) {
+        debugPrint('✅ Seat added successfully');
+        return true;
+      }
+
+      final errorMessage = responseBody['message'] ?? 'Koltuk eklenirken bir hata oluştu';
+      debugPrint('⚠️ Add seat API response not successful: status=${response.statusCode}, message=$errorMessage');
+      throw Exception(errorMessage);
+    } catch (e) {
+      debugPrint('❌ Add seat HTTP hatası: $e');
+      if (e is Exception) {
+        rethrow; // Exception'ı yeniden fırlat (mesaj ile birlikte)
+      }
+      throw Exception('Bağlantı hatası: ${e.toString()}');
+    }
+  }
+
   /// Tüm koltukları getirir
   /// Başarılıysa Seat listesi döner, hata durumunda boş liste döner
   Future<List<Seat>> getSeats() async {
