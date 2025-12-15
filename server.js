@@ -4,6 +4,7 @@ const cors = require('cors');
 const authRoutes = require('./routes/auth');
 const checkinRoutes = require('./routes/checkin');
 const parkingRoutes = require('./routes/parking');
+const adminFlightMgmtRoutes = require('./routes/admin_flight_management');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -17,6 +18,7 @@ app.use(express.urlencoded({ extended: true }));
 app.use('/api', authRoutes);
 app.use('/api/checkin', checkinRoutes);
 app.use('/api/parking', parkingRoutes);
+app.use('/api/admin/flight-management', adminFlightMgmtRoutes);
 
 // Health check endpoint
 app.get('/health', (req, res) => {
