@@ -1,4 +1,13 @@
 import 'package:flutter/material.dart';
+import 'dart:convert';
+import 'models/recent_checkout.dart';
+import 'services/recent_checkouts_api.dart';
+import 'models/recent_checkin_model.dart';
+import 'services/recent_checkins_api.dart';
+import 'models/dashboard_kpi_model.dart';
+import 'services/parking_dashboard_api.dart';
+import 'models/parking_lot_occupancy_model.dart';
+import 'services/parking_lot_occupancy_api.dart';
 
 class ParkingDashboardScreen extends StatefulWidget {
   const ParkingDashboardScreen({super.key});
@@ -8,15 +17,84 @@ class ParkingDashboardScreen extends StatefulWidget {
 }
 
 class _ParkingDashboardScreenState extends State<ParkingDashboardScreen> {
+  Future<List<RecentCheckout>>? _checkoutsFuture;
+  bool _showJsonExits = false;
+  DashboardKpiModel? _kpi;
+  String? _kpiError;
+  Future<List<ParkingLotOccupancyModel>>? _occupancyFuture;
+  String? _occupancyError;
+  Future<List<RecentCheckInModel>>? _entriesFuture;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadCheckouts();
+    _loadKpi();
+    _loadOccupancy();
+    _loadEntries();
+  }
+
+  void _loadCheckouts() {
+    setState(() {
+      _checkoutsFuture = RecentCheckoutsApi.fetchRecentCheckouts();
+    });
+  }
+
+  Future<void> _loadKpi() async {
+    try {
+      final result = await ParkingDashboardApi.fetchKpi();
+      setState(() {
+        _kpi = result;
+        _kpiError = null;
+      });
+    } catch (e) {
+      setState(() {
+        _kpi = null;
+        _kpiError = e.toString();
+      });
+    }
+  }
+
+  void _loadOccupancy() {
+    setState(() {
+      _occupancyFuture = ParkingLotOccupancyApi.fetchOccupancy();
+      _occupancyError = null;
+    });
+  }
+
+  void _loadEntries({int topN = 5}) {
+    setState(() {
+      _entriesFuture = RecentCheckInsApi.fetchRecentCheckIns(topN: topN);
+    });
+  }
+
+  String _formatDuration(int minutes) {
+    final h = minutes ~/ 60;
+    final m = minutes % 60;
+    if (h > 0) {
+      return '${h}s ${m}dk';
+    }
+    return '${m}dk';
+  }
+
+  String _formatTime(DateTime dt) {
+    final hh = dt.hour.toString().padLeft(2, '0');
+    final mm = dt.minute.toString().padLeft(2, '0');
+    return '$hh:$mm';
+  }
+
+  String _formatTL(double amount) {
+    return '₺${amount.toStringAsFixed(0)}';
+  }
 
   @override
   Widget build(BuildContext context) {
-    // --- MOCK VERİLER (React'ten) ---
+    // --- KPI VERİLERİ (API) ---
     final kpiData = {
-      'totalSpots': 342,
-      'occupiedSpots': 218,
-      'availableSpots': 124,
-      'activeReservations': 45,
+      'totalSpots': _kpi?.totalSpots ?? 0,
+      'occupiedSpots': _kpi?.occupiedSpots ?? 0,
+      'availableSpots': _kpi?.freeSpots ?? 0,
+      'activeReservations': _kpi?.activeReservations ?? 0,
     };
 
     final stats = [
@@ -50,27 +128,9 @@ class _ParkingDashboardScreenState extends State<ParkingDashboardScreen> {
       },
     ];
 
-    final parkingLots = [
-      {'name': 'A Blok', 'total': 100, 'occupied': 68, 'available': 32, 'percentage': 0.68}, // 0.68 = %68
-      {'name': 'B Blok', 'total': 80, 'occupied': 52, 'available': 28, 'percentage': 0.65},
-      {'name': 'C Blok', 'total': 90, 'occupied': 58, 'available': 32, 'percentage': 0.64},
-      {'name': 'D Blok', 'total': 72, 'occupied': 40, 'available': 32, 'percentage': 0.56},
-    ];
+    final parkingLots = <Map<String, Object>>[];
 
-    final recentEntries = [
-      {'id': 1, 'plate': '34 ABC 123', 'vehicleType': 'Otomobil', 'entryTime': '14:30', 'spot': 'A-45'},
-      {'id': 2, 'plate': '06 XYZ 789', 'vehicleType': 'SUV', 'entryTime': '14:15', 'spot': 'B-12'},
-      {'id': 3, 'plate': '35 DEF 456', 'vehicleType': 'Otomobil', 'entryTime': '13:45', 'spot': 'C-28'},
-      {'id': 4, 'plate': '16 GHI 321', 'vehicleType': 'Minivan', 'entryTime': '13:20', 'spot': 'A-67'},
-      {'id': 5, 'plate': '41 JKL 654', 'vehicleType': 'Otomobil', 'entryTime': '12:50', 'spot': 'D-15'},
-    ];
-
-    final recentExits = [
-      {'id': 1, 'plate': '34 MNO 987', 'vehicleType': 'Otomobil', 'exitTime': '14:25', 'duration': '3s 15dk', 'amount': '₺85'},
-      {'id': 2, 'plate': '06 PQR 654', 'vehicleType': 'SUV', 'exitTime': '14:10', 'duration': '2s 45dk', 'amount': '₺120'},
-      {'id': 3, 'plate': '35 STU 321', 'vehicleType': 'Otomobil', 'exitTime': '13:55', 'duration': '4s 20dk', 'amount': '₺95'},
-      {'id': 4, 'plate': '16 VWX 159', 'vehicleType': 'Minivan', 'exitTime': '13:30', 'duration': '5s 10dk', 'amount': '₺150'},
-    ];
+    final recentEntries = <Map<String, Object>>[];
 
     return Scaffold(
       backgroundColor: const Color(0xFFF9FAFB), // bg-gray-50
@@ -136,27 +196,67 @@ class _ParkingDashboardScreenState extends State<ParkingDashboardScreen> {
                   const Text("Otopark Blokları Doluluk Oranı", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
                   const SizedBox(height: 24),
 
-                  // Bloklar Grid'i
-                  LayoutBuilder(
-                    builder: (context, constraints) {
-                      int cols = constraints.maxWidth > 1000 ? 4 : (constraints.maxWidth > 600 ? 2 : 1);
-                      return GridView.builder(
-                        shrinkWrap: true,
-                        physics: const NeverScrollableScrollPhysics(),
-                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                          crossAxisCount: cols,
-                          crossAxisSpacing: 24,
-                          mainAxisSpacing: 24,
-                          childAspectRatio: 1.5, // Kart oranı
-                        ),
-                        itemCount: parkingLots.length,
-                        itemBuilder: (context, index) {
-                          final lot = parkingLots[index];
-                          return _ParkingLotProgress(
-                            name: lot['name'] as String,
-                            percentage: lot['percentage'] as double,
-                            occupied: lot['occupied'] as int,
-                            available: lot['available'] as int,
+                  FutureBuilder<List<ParkingLotOccupancyModel>>(
+                    future: _occupancyFuture,
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      if (snapshot.hasError) {
+                        return Column(
+                          children: [
+                            Text(
+                              'Doluluk verisi alınamadı',
+                              style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              snapshot.error.toString(),
+                              style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                              textAlign: TextAlign.center,
+                            ),
+                            const SizedBox(height: 12),
+                            ElevatedButton(
+                              onPressed: _loadOccupancy,
+                              child: const Text('Tekrar Dene'),
+                            ),
+                          ],
+                        );
+                      }
+                      final data = snapshot.data ?? [];
+                      final mappedLots = data.map((e) {
+                        final rate = e.occupancyRate > 1.0 ? e.occupancyRate / 100.0 : e.occupancyRate;
+                        return {
+                          'name': e.parkingLotName,
+                          'total': e.totalSpots,
+                          'occupied': e.occupiedSpots,
+                          'available': e.freeSpots,
+                          'percentage': rate,
+                        };
+                      }).toList();
+
+                      return LayoutBuilder(
+                        builder: (context, constraints) {
+                          int cols = constraints.maxWidth > 1000 ? 4 : (constraints.maxWidth > 600 ? 2 : 1);
+                          return GridView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: cols,
+                              crossAxisSpacing: 24,
+                              mainAxisSpacing: 24,
+                              childAspectRatio: 1.5,
+                            ),
+                            itemCount: mappedLots.length,
+                            itemBuilder: (context, index) {
+                              final lot = mappedLots[index];
+                              return _ParkingLotProgress(
+                                name: lot['name'] as String,
+                                percentage: lot['percentage'] as double,
+                                occupied: lot['occupied'] as int,
+                                available: lot['available'] as int,
+                              );
+                            },
                           );
                         },
                       );
@@ -176,17 +276,311 @@ class _ParkingDashboardScreenState extends State<ParkingDashboardScreen> {
                   return Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(child: _EntriesTable(entries: recentEntries)),
+                      Expanded(
+                        child: FutureBuilder<List<RecentCheckInModel>>(
+                          future: _entriesFuture,
+                          builder: (context, snapshot) {
+                            if (snapshot.connectionState == ConnectionState.waiting) {
+                              return Container(
+                                padding: const EdgeInsets.all(20),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(color: Colors.grey.shade200),
+                                ),
+                                child: const Center(child: CircularProgressIndicator()),
+                              );
+                            }
+                            if (snapshot.hasError) {
+                              return Container(
+                                padding: const EdgeInsets.all(20),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(color: Colors.grey.shade200),
+                                ),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Text(
+                                      'Veri alınamadı',
+                                      style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      snapshot.error.toString(),
+                                      style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                    const SizedBox(height: 12),
+                                    ElevatedButton(
+                                      onPressed: () => _loadEntries(),
+                                      child: const Text('Tekrar Dene'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }
+                            final data = snapshot.data ?? [];
+                            final entries = data
+                                .map((e) => {
+                                      'plate': e.plateNumber,
+                                      'vehicleType': e.vehicleType,
+                                      'entryTime': _formatTime(e.checkInTime),
+                                      'spot': e.spot,
+                                    })
+                                .toList();
+                            return _EntriesTable(entries: entries);
+                          },
+                        ),
+                      ),
                       const SizedBox(width: 24),
-                      Expanded(child: _ExitsTable(exits: recentExits)),
+                      Expanded(
+                        child: FutureBuilder<List<RecentCheckout>>(
+                          future: _checkoutsFuture,
+                          builder: (context, snapshot) {
+                            if (snapshot.connectionState == ConnectionState.waiting) {
+                              return Container(
+                                padding: const EdgeInsets.all(20),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(color: Colors.grey.shade200),
+                                ),
+                                child: const Center(child: CircularProgressIndicator()),
+                              );
+                            }
+                            if (snapshot.hasError) {
+                              return Container(
+                                padding: const EdgeInsets.all(20),
+                                decoration: BoxDecoration(
+                                  color: Colors.white,
+                                  borderRadius: BorderRadius.circular(16),
+                                  border: Border.all(color: Colors.grey.shade200),
+                                ),
+                                child: Column(
+                                  mainAxisAlignment: MainAxisAlignment.center,
+                                  children: [
+                                    Text(
+                                      'Veri alınamadı',
+                                      style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold),
+                                    ),
+                                    const SizedBox(height: 8),
+                                    Text(
+                                      snapshot.error.toString(),
+                                      style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                                      textAlign: TextAlign.center,
+                                    ),
+                                    const SizedBox(height: 12),
+                                    ElevatedButton(
+                                      onPressed: _loadCheckouts,
+                                      child: const Text('Tekrar Dene'),
+                                    ),
+                                  ],
+                                ),
+                              );
+                            }
+                            final data = snapshot.data ?? [];
+                            final exits = data
+                                .map((e) => {
+                                      'plate': e.plateNumber,
+                                      'duration': _formatDuration(e.durationMinutes),
+                                      'exitTime': _formatTime(e.checkOutTime),
+                                      'amount': _formatTL(e.amount),
+                                    })
+                                .toList();
+                            final prettyJson = const JsonEncoder.withIndent('  ').convert(
+                              data.map((e) => {
+                                    'plateNumber': e.plateNumber,
+                                    'durationMinutes': e.durationMinutes,
+                                    'checkOutTime': e.checkOutTime.toIso8601String(),
+                                    'amount': e.amount,
+                                  }).toList(),
+                            );
+                            return Column(
+                              children: [
+                                Row(
+                                  mainAxisAlignment: MainAxisAlignment.end,
+                                  children: [],
+                                ),
+                                _showJsonExits
+                                    ? Container(
+                                        padding: const EdgeInsets.all(16),
+                                        decoration: BoxDecoration(
+                                          color: Colors.white,
+                                          borderRadius: BorderRadius.circular(16),
+                                          border: Border.all(color: Colors.grey.shade200),
+                                        ),
+                                        child: SingleChildScrollView(
+                                          scrollDirection: Axis.vertical,
+                                          child: SingleChildScrollView(
+                                            scrollDirection: Axis.horizontal,
+                                            child: Text(
+                                              prettyJson,
+                                              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                                            ),
+                                          ),
+                                        ),
+                                      )
+                                    : _ExitsTable(exits: exits),
+                              ],
+                            );
+                          },
+                        ),
+                      ),
                     ],
                   );
                 } else {
                   return Column(
                     children: [
-                      _EntriesTable(entries: recentEntries),
+                      FutureBuilder<List<RecentCheckInModel>>(
+                        future: _entriesFuture,
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState == ConnectionState.waiting) {
+                            return Container(
+                              padding: const EdgeInsets.all(20),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: Colors.grey.shade200),
+                              ),
+                              child: const Center(child: CircularProgressIndicator()),
+                            );
+                          }
+                          if (snapshot.hasError) {
+                            return Container(
+                              padding: const EdgeInsets.all(20),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: Colors.grey.shade200),
+                              ),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    'Veri alınamadı',
+                                    style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    snapshot.error.toString(),
+                                    style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  const SizedBox(height: 12),
+                                  ElevatedButton(
+                                    onPressed: () => _loadEntries(),
+                                    child: const Text('Tekrar Dene'),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }
+                          final data = snapshot.data ?? [];
+                          final entries = data
+                              .map((e) => {
+                                    'plate': e.plateNumber,
+                                    'vehicleType': e.vehicleType,
+                                    'entryTime': _formatTime(e.checkInTime),
+                                    'spot': e.spot,
+                                  })
+                              .toList();
+                          return _EntriesTable(entries: entries);
+                        },
+                      ),
                       const SizedBox(height: 24),
-                      _ExitsTable(exits: recentExits),
+                      FutureBuilder<List<RecentCheckout>>(
+                        future: _checkoutsFuture,
+                        builder: (context, snapshot) {
+                          if (snapshot.connectionState == ConnectionState.waiting) {
+                            return Container(
+                              padding: const EdgeInsets.all(20),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: Colors.grey.shade200),
+                              ),
+                              child: const Center(child: CircularProgressIndicator()),
+                            );
+                          }
+                          if (snapshot.hasError) {
+                            return Container(
+                              padding: const EdgeInsets.all(20),
+                              decoration: BoxDecoration(
+                                color: Colors.white,
+                                borderRadius: BorderRadius.circular(16),
+                                border: Border.all(color: Colors.grey.shade200),
+                              ),
+                              child: Column(
+                                mainAxisAlignment: MainAxisAlignment.center,
+                                children: [
+                                  Text(
+                                    'Veri alınamadı',
+                                    style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold),
+                                  ),
+                                  const SizedBox(height: 8),
+                                  Text(
+                                    snapshot.error.toString(),
+                                    style: TextStyle(color: Colors.grey.shade600, fontSize: 12),
+                                    textAlign: TextAlign.center,
+                                  ),
+                                  const SizedBox(height: 12),
+                                  ElevatedButton(
+                                    onPressed: _loadCheckouts,
+                                    child: const Text('Tekrar Dene'),
+                                  ),
+                                ],
+                              ),
+                            );
+                          }
+                          final data = snapshot.data ?? [];
+                          final exits = data
+                              .map((e) => {
+                                    'plate': e.plateNumber,
+                                    'duration': _formatDuration(e.durationMinutes),
+                                    'exitTime': _formatTime(e.checkOutTime),
+                                    'amount': _formatTL(e.amount),
+                                  })
+                              .toList();
+                          final prettyJson = const JsonEncoder.withIndent('  ').convert(
+                            data.map((e) => {
+                                  'plateNumber': e.plateNumber,
+                                  'durationMinutes': e.durationMinutes,
+                                  'checkOutTime': e.checkOutTime.toIso8601String(),
+                                  'amount': e.amount,
+                                }).toList(),
+                          );
+                          return Column(
+                            children: [
+                              Row(
+                                mainAxisAlignment: MainAxisAlignment.end,
+                                children: [],
+                              ),
+                              _showJsonExits
+                                  ? Container(
+                                      padding: const EdgeInsets.all(16),
+                                      decoration: BoxDecoration(
+                                        color: Colors.white,
+                                        borderRadius: BorderRadius.circular(16),
+                                        border: Border.all(color: Colors.grey.shade200),
+                                      ),
+                                      child: SingleChildScrollView(
+                                        scrollDirection: Axis.vertical,
+                                        child: SingleChildScrollView(
+                                          scrollDirection: Axis.horizontal,
+                                          child: Text(
+                                            prettyJson,
+                                            style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+                                          ),
+                                        ),
+                                      ),
+                                    )
+                                  : _ExitsTable(exits: exits),
+                            ],
+                          );
+                        },
+                      ),
                     ],
                   );
                 }

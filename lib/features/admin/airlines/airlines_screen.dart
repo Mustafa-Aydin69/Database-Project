@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
+import 'models/airline.dart';
+import 'services/airlines_api.dart';
 
 class AirlinesScreen extends StatefulWidget {
   const AirlinesScreen({super.key});
@@ -9,9 +11,8 @@ class AirlinesScreen extends StatefulWidget {
 }
 
 class _AirlinesScreenState extends State<AirlinesScreen> {
-  // --- STATE ---
-  int _currentPage = 0;
-  final int _itemsPerPage = 10;
+  Future<List<Airline>>? _future;
+  List<Airline> _items = [];
 
   // Form Kontrolcüleri
   final _formKey = GlobalKey<FormState>();
@@ -19,29 +20,20 @@ class _AirlinesScreenState extends State<AirlinesScreen> {
   final TextEditingController _countryController = TextEditingController();
   final TextEditingController _contactController = TextEditingController();
 
-  // --- MOCK VERİLER (React'ten alındı) ---
-  List<Map<String, dynamic>> _airlines = [
-    {'id': 1, 'name': 'Turkish Airlines', 'country': 'Türkiye', 'contact': '+90 212 444 0 849'},
-    {'id': 2, 'name': 'Pegasus Airlines', 'country': 'Türkiye', 'contact': '+90 888 228 1212'},
-    {'id': 3, 'name': 'SunExpress', 'country': 'Türkiye', 'contact': '+90 444 0 797'},
-    {'id': 4, 'name': 'AnadoluJet', 'country': 'Türkiye', 'contact': '+90 444 2 538'},
-    {'id': 5, 'name': 'Lufthansa', 'country': 'Almanya', 'contact': '+49 69 86 799 799'},
-    // Sayfalamayı test etmek için veri çoğaltalım
-    ...List.generate(15, (index) => {
-      'id': 6 + index,
-      'name': 'Airline ${index + 1}',
-      'country': index % 2 == 0 ? 'USA' : 'France',
-      'contact': '+1 555 010 ${1000 + index}'
-    }),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _future = AirlinesApi.fetchAirlines();
+  }
 
   // --- CRUD İŞLEMLERİ ---
 
-  void _showAirlineDialog({Map<String, dynamic>? airline}) {
+  void _showAirlineDialog({Airline? airline}) {
+    bool _saving = false;
     if (airline != null) {
-      _nameController.text = airline['name'];
-      _countryController.text = airline['country'];
-      _contactController.text = airline['contact'];
+      _nameController.text = airline.name;
+      _countryController.text = airline.country;
+      _contactController.text = airline.contact;
     } else {
       _nameController.clear();
       _countryController.clear();
@@ -50,7 +42,48 @@ class _AirlinesScreenState extends State<AirlinesScreen> {
 
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          Future<void> _submit() async {
+            if (!_formKey.currentState!.validate()) return;
+            setDialogState(() => _saving = true);
+            try {
+              if (airline == null) {
+                final created = await AirlinesApi.addAirline(
+                  name: _nameController.text.trim(),
+                  country: _countryController.text.trim(),
+                  contact: _contactController.text.trim(),
+                );
+                setState(() {
+                  _items.insert(0, created);
+                });
+                Navigator.pop(context);
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Havayolu eklendi.')));
+              } else {
+                final updated = await AirlinesApi.updateAirline(
+                  airlineId: airline.airlineId,
+                  name: _nameController.text.trim(),
+                  country: _countryController.text.trim(),
+                  contact: _contactController.text.trim(),
+                );
+                final idx = _items.indexWhere((a) => a.airlineId == updated.airlineId);
+                if (idx >= 0) {
+                  setState(() {
+                    _items[idx] = updated;
+                  });
+                }
+                Navigator.pop(context);
+              }
+            } catch (e) {
+              setDialogState(() => _saving = false);
+              ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Güncelleme başarısız: $e')));
+            }
+          }
+          final canSubmit = !_saving &&
+              _nameController.text.trim().isNotEmpty &&
+              _countryController.text.trim().isNotEmpty &&
+              _contactController.text.trim().isNotEmpty;
+          return AlertDialog(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(airline != null ? 'Havayolu Düzenle' : 'Yeni Havayolu'),
         content: SizedBox(
@@ -69,6 +102,7 @@ class _AirlinesScreenState extends State<AirlinesScreen> {
                       prefixIcon: Icon(Icons.flight),
                     ),
                     validator: (v) => v!.isEmpty ? "Zorunlu alan" : null,
+                    onChanged: (_) => setDialogState(() {}),
                   ),
                   const SizedBox(height: 16),
                   TextFormField(
@@ -79,6 +113,7 @@ class _AirlinesScreenState extends State<AirlinesScreen> {
                       prefixIcon: Icon(Icons.public),
                     ),
                     validator: (v) => v!.isEmpty ? "Zorunlu alan" : null,
+                    onChanged: (_) => setDialogState(() {}),
                   ),
                   const SizedBox(height: 16),
                   TextFormField(
@@ -89,6 +124,7 @@ class _AirlinesScreenState extends State<AirlinesScreen> {
                       prefixIcon: Icon(Icons.phone),
                     ),
                     validator: (v) => v!.isEmpty ? "Zorunlu alan" : null,
+                    onChanged: (_) => setDialogState(() {}),
                   ),
                 ],
               ),
@@ -102,34 +138,12 @@ class _AirlinesScreenState extends State<AirlinesScreen> {
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
-            onPressed: () {
-              if (_formKey.currentState!.validate()) {
-                setState(() {
-                  if (airline != null) {
-                    // Güncelle
-                    final index = _airlines.indexWhere((a) => a['id'] == airline['id']);
-                    _airlines[index] = {
-                      'id': airline['id'],
-                      'name': _nameController.text,
-                      'country': _countryController.text,
-                      'contact': _contactController.text,
-                    };
-                  } else {
-                    // Ekle
-                    _airlines.insert(0, {
-                      'id': DateTime.now().millisecondsSinceEpoch,
-                      'name': _nameController.text,
-                      'country': _countryController.text,
-                      'contact': _contactController.text,
-                    });
-                  }
-                });
-                Navigator.pop(context);
-              }
-            },
-            child: Text(airline != null ? "Güncelle" : "Ekle"),
+            onPressed: canSubmit ? _submit : null,
+            child: _saving ? const SizedBox(width: 16, height: 16, child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white)) : Text(airline != null ? "Güncelle" : "Ekle"),
           ),
         ],
+          );
+        },
       ),
     );
   }
@@ -143,11 +157,17 @@ class _AirlinesScreenState extends State<AirlinesScreen> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
           TextButton(
-            onPressed: () {
-              setState(() {
-                _airlines.removeWhere((a) => a['id'] == id);
-              });
+            onPressed: () async {
               Navigator.pop(context);
+              try {
+                await AirlinesApi.deleteAirline(id);
+                setState(() {
+                  _items.removeWhere((a) => a.airlineId == id);
+                });
+                ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('Havayolu silindi')));
+              } catch (e) {
+                ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('Silme başarısız: $e')));
+              }
             },
             child: const Text("Sil", style: TextStyle(color: Colors.red)),
           ),
@@ -158,99 +178,96 @@ class _AirlinesScreenState extends State<AirlinesScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Sayfalama
-    final totalPages = (_airlines.length / _itemsPerPage).ceil();
-    if (_currentPage >= totalPages && totalPages > 0) _currentPage = totalPages - 1;
-    final startIndex = _currentPage * _itemsPerPage;
-    final endIndex = min(startIndex + _itemsPerPage, _airlines.length);
-    final currentData = _airlines.isEmpty ? [] : _airlines.sublist(startIndex, endIndex);
-
     return Scaffold(
       backgroundColor: const Color(0xFFF9FAFB),
-      body: SingleChildScrollView(
-        padding: const EdgeInsets.all(24.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            // --- HEADER ---
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
-              children: [
-                const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text("Havayolu Yönetimi", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black87)),
-                    SizedBox(height: 4),
-                    Text("Havayolu şirketlerini yönetin", style: TextStyle(color: Colors.grey)),
-                  ],
-                ),
-                ElevatedButton.icon(
-                  onPressed: () => _showAirlineDialog(),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.teal,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
-                  icon: const Icon(Icons.add),
-                  label: const Text("Yeni Havayolu"),
-                ),
-              ],
-            ),
-
-            const SizedBox(height: 24),
-
-            // --- KART LİSTESİ (Responsive Grid) ---
-            if (currentData.isEmpty)
-              const Center(child: Padding(padding: EdgeInsets.all(40), child: Text("Kayıt bulunamadı.")))
-            else
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  int crossAxisCount = constraints.maxWidth > 1100 ? 3 : (constraints.maxWidth > 700 ? 2 : 1);
-                  return GridView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: crossAxisCount,
-                      crossAxisSpacing: 16,
-                      mainAxisSpacing: 16,
-                      childAspectRatio: 1.8, // Kart Oranı
-                    ),
-                    itemCount: currentData.length,
-                    itemBuilder: (context, index) {
-                      return _AirlineCard(
-                        airline: currentData[index],
-                        onEdit: () => _showAirlineDialog(airline: currentData[index]),
-                        onDelete: () => _deleteAirline(currentData[index]['id']),
-                      );
-                    },
-                  );
-                },
-              ),
-
-            const SizedBox(height: 24),
-
-            // --- SAYFALAMA ---
-            if (totalPages > 1)
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+      body: FutureBuilder<List<Airline>>(
+        future: _future,
+        builder: (context, snapshot) {
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(child: CircularProgressIndicator());
+          }
+          if (snapshot.hasError) {
+            return Padding(
+              padding: const EdgeInsets.all(24.0),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.center,
                 children: [
-                  IconButton(
-                    onPressed: _currentPage > 0 ? () => setState(() => _currentPage--) : null,
-                    icon: const Icon(Icons.chevron_left),
-                  ),
-                  Padding(
-                    padding: const EdgeInsets.symmetric(horizontal: 12),
-                    child: Text("Sayfa ${_currentPage + 1} / $totalPages"),
-                  ),
-                  IconButton(
-                    onPressed: _currentPage < totalPages - 1 ? () => setState(() => _currentPage++) : null,
-                    icon: const Icon(Icons.chevron_right),
-                  ),
+                  Text('Havayolu verisi alınamadı', style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold)),
+                  const SizedBox(height: 8),
+                  Text(snapshot.error.toString(), style: TextStyle(color: Colors.grey.shade600, fontSize: 12), textAlign: TextAlign.center),
+                  const SizedBox(height: 12),
+                  ElevatedButton(onPressed: () => setState(() => _future = AirlinesApi.fetchAirlines()), child: const Text('Tekrar Dene')),
                 ],
               ),
-          ],
-        ),
+            );
+          }
+          final data = snapshot.data ?? [];
+          if (_items.isEmpty && data.isNotEmpty) {
+            WidgetsBinding.instance.addPostFrameCallback((_) {
+              if (mounted) setState(() => _items = data);
+            });
+          }
+          return SingleChildScrollView(
+            padding: const EdgeInsets.all(24.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Row(
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text("Havayolu Yönetimi", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black87)),
+                        SizedBox(height: 4),
+                        Text("Havayolu şirketlerini yönetin", style: TextStyle(color: Colors.grey)),
+                      ],
+                    ),
+                    ElevatedButton.icon(
+                      onPressed: () => _showAirlineDialog(),
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.teal,
+                        foregroundColor: Colors.white,
+                        padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+                      ),
+                      icon: const Icon(Icons.add),
+                      label: const Text("Yeni Havayolu"),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                if ((_items.isEmpty))
+                  const Center(child: Padding(padding: EdgeInsets.all(40), child: Text("Havayolu bulunamadı")))
+                else
+                  LayoutBuilder(
+                    builder: (context, constraints) {
+                      int crossAxisCount = constraints.maxWidth > 1100 ? 3 : (constraints.maxWidth > 700 ? 2 : 1);
+                      return GridView.builder(
+                        shrinkWrap: true,
+                        physics: const NeverScrollableScrollPhysics(),
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: crossAxisCount,
+                          crossAxisSpacing: 16,
+                          mainAxisSpacing: 16,
+                          childAspectRatio: 1.8,
+                        ),
+                        itemCount: _items.length,
+                        itemBuilder: (context, index) {
+                          final item = _items[index];
+                          return _AirlineCard(
+                            airline: item,
+                            onEdit: () => _showAirlineDialog(airline: item),
+                            onDelete: () => _deleteAirline(item.airlineId),
+                          );
+                        },
+                      );
+                    },
+                  ),
+              ],
+            ),
+          );
+        },
       ),
     );
   }
@@ -258,7 +275,7 @@ class _AirlinesScreenState extends State<AirlinesScreen> {
 
 // --- HAVAYOLU KARTI ---
 class _AirlineCard extends StatelessWidget {
-  final Map<String, dynamic> airline;
+  final Airline airline;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
@@ -284,7 +301,7 @@ class _AirlineCard extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  airline['name'],
+                  airline.name,
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -292,7 +309,7 @@ class _AirlineCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(color: Colors.teal.shade50, borderRadius: BorderRadius.circular(4)),
-                child: Text("ID: ${airline['id']}", style: TextStyle(fontSize: 11, color: Colors.teal.shade700)),
+                child: Text("ID: ${airline.airlineId}", style: TextStyle(fontSize: 11, color: Colors.teal.shade700)),
               ),
             ],
           ),
@@ -300,9 +317,9 @@ class _AirlineCard extends StatelessWidget {
           const Divider(height: 24),
 
           // Bilgiler
-          _InfoRow(icon: Icons.public, text: airline['country']),
+          _InfoRow(icon: Icons.public, text: airline.country),
           const SizedBox(height: 8),
-          _InfoRow(icon: Icons.phone, text: airline['contact']),
+          _InfoRow(icon: Icons.phone, text: airline.contact),
 
           const Divider(height: 24),
 

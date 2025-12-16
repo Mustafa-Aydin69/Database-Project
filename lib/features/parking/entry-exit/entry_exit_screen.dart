@@ -1,6 +1,16 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
 import 'package:intl/intl.dart';
+import 'models/currently_parked_vehicle_model.dart';
+import 'services/currently_parked_api.dart';
+import 'models/exit_vehicle_model.dart';
+import 'services/recent_exits_api.dart';
+import 'models/exit_popup_info_model.dart';
+import 'services/parking_api_service.dart';
+import 'models/exit_panel_card.dart';
+import 'services/exit_panel_cards_api.dart';
+import 'models/parking_lot_dropdown_item.dart';
+import 'services/parking_lots_api.dart';
 
 class EntryExitScreen extends StatefulWidget {
   const EntryExitScreen({super.key});
@@ -11,6 +21,8 @@ class EntryExitScreen extends StatefulWidget {
 
 class _EntryExitScreenState extends State<EntryExitScreen> with SingleTickerProviderStateMixin {
   late TabController _tabController;
+  Future<List<CurrentlyParkedVehicleModel>>? _parkedFuture;
+  Future<List<ExitPanelCard>>? _recentExitsFuture;
 
   // --- MOCK VERİLER ---
   List<Map<String, dynamic>> _parkedVehicles = [
@@ -49,16 +61,44 @@ class _EntryExitScreenState extends State<EntryExitScreen> with SingleTickerProv
   final TextEditingController _ownerNameController = TextEditingController();
   final TextEditingController _phoneController = TextEditingController();
   final TextEditingController _spotController = TextEditingController();
-  String _selectedVehicleType = 'Otomobil';
-  String _selectedAirport = 'İstanbul Havalimanı (IST)';
+  int? _selectedVehicleTypeId;
+  String _selectedVehicleTypeName = '';
+  int? _selectedParkingLotId;
+  String _selectedParkingLotName = '';
 
-  final List<String> _vehicleTypes = ['Otomobil', 'SUV', 'Minivan', 'Pickup', 'Motosiklet'];
-  final List<String> _airports = ['İstanbul Havalimanı (IST)', 'Sabiha Gökçen (SAW)', 'Antalya Havalimanı (AYT)', 'Esenboğa (ESB)'];
+  Future<List<Map<String, dynamic>>>? _vehicleTypesFuture;
+  Future<List<ParkingLotDropdownItem>>? _parkingLotsFuture;
+  bool _isSubmittingEntry = false;
+  String? _entryError;
 
   @override
   void initState() {
     super.initState();
     _tabController = TabController(length: 2, vsync: this);
+    _loadParked();
+    _loadRecentExits();
+  }
+
+  void _loadParked() {
+    setState(() {
+      _parkedFuture = CurrentlyParkedApi.fetchCurrentlyParked();
+    });
+  }
+
+  void _loadRecentExits() {
+    setState(() {
+      _recentExitsFuture = ExitPanelCardsApi.fetch();
+    });
+  }
+
+  String _formatTime(DateTime dt) {
+    final hh = dt.hour.toString().padLeft(2, '0');
+    final mm = dt.minute.toString().padLeft(2, '0');
+    return '$hh:$mm';
+  }
+
+  String _formatDateTime(DateTime dt) {
+    return DateFormat('yyyy-MM-dd HH:mm').format(dt);
   }
 
   // --- GİRİŞ İŞLEMİ ---
@@ -67,6 +107,9 @@ class _EntryExitScreenState extends State<EntryExitScreen> with SingleTickerProv
     _ownerNameController.clear();
     _phoneController.clear();
     _spotController.clear();
+    _entryError = null;
+    _isSubmittingEntry = false;
+    _vehicleTypesFuture ??= ParkingApiService.getVehicleTypes();
 
     showDialog(
       context: context,
@@ -86,11 +129,52 @@ class _EntryExitScreenState extends State<EntryExitScreen> with SingleTickerProv
                     validator: (v) => v!.isEmpty ? "Zorunlu" : null,
                   ),
                   const SizedBox(height: 16),
-                  DropdownButtonFormField<String>(
-                    value: _selectedVehicleType,
-                    decoration: const InputDecoration(labelText: "Araç Tipi", border: OutlineInputBorder()),
-                    items: _vehicleTypes.map((t) => DropdownMenuItem(value: t, child: Text(t))).toList(),
-                    onChanged: (val) => setState(() => _selectedVehicleType = val!),
+                  FutureBuilder<List<Map<String, dynamic>>>(
+                    future: _vehicleTypesFuture,
+                    builder: (context, snapTypes) {
+                      if (snapTypes.connectionState == ConnectionState.waiting) {
+                        return const SizedBox(
+                          height: 56,
+                          child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                        );
+                      }
+                      if (snapTypes.hasError) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text('Araç tipleri alınamadı', style: TextStyle(color: Colors.red.shade700)),
+                            const SizedBox(height: 8),
+                            OutlinedButton(
+                              onPressed: () => setState(() => _vehicleTypesFuture = ParkingApiService.getVehicleTypes()),
+                              child: const Text('Tekrar Dene'),
+                            ),
+                          ],
+                        );
+                      }
+                      final types = snapTypes.data ?? [];
+                      return DropdownButtonFormField<int>(
+                        value: _selectedVehicleTypeId,
+                        decoration: const InputDecoration(labelText: "Araç Tipi", border: OutlineInputBorder()),
+                        items: types
+                            .map((t) => DropdownMenuItem(
+                                  value: t['typeId'] as int,
+                                  child: Text((t['typeName'] as String?) ?? ''),
+                                ))
+                            .toList(),
+                        onChanged: (val) {
+                          setState(() {
+                            _selectedVehicleTypeId = val;
+                            final found = types.firstWhere(
+                              (x) => x['typeId'] == val,
+                              orElse: () => {'typeId': val ?? 0, 'typeName': ''},
+                            );
+                            _selectedVehicleTypeName = (found['typeName'] as String?) ?? '';
+                          });
+                        },
+                        isExpanded: true,
+                        validator: (v) => (v == null) ? "Zorunlu" : null,
+                      );
+                    },
                   ),
                   const SizedBox(height: 16),
                   TextFormField(
@@ -102,14 +186,52 @@ class _EntryExitScreenState extends State<EntryExitScreen> with SingleTickerProv
                   TextFormField(
                     controller: _phoneController,
                     decoration: const InputDecoration(labelText: "Telefon", border: OutlineInputBorder()),
+                    validator: (v) => v!.isEmpty ? "Zorunlu" : null,
                   ),
                   const SizedBox(height: 16),
-                  DropdownButtonFormField<String>(
-                    value: _selectedAirport,
-                    decoration: const InputDecoration(labelText: "Havalimanı", border: OutlineInputBorder()),
-                    items: _airports.map((a) => DropdownMenuItem(value: a, child: Text(a, overflow: TextOverflow.ellipsis))).toList(),
-                    onChanged: (val) => setState(() => _selectedAirport = val!),
-                    isExpanded: true,
+                  FutureBuilder<List<ParkingLotDropdownItem>>(
+                    future: _parkingLotsFuture ??= ParkingLotsApi.fetch(),
+                    builder: (context, snapLots) {
+                      if (snapLots.connectionState == ConnectionState.waiting) {
+                        return const SizedBox(
+                          height: 56,
+                          child: Center(child: CircularProgressIndicator(strokeWidth: 2)),
+                        );
+                      }
+                      if (snapLots.hasError) {
+                        return Column(
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Text('Otopark listesi alınamadı', style: TextStyle(color: Colors.red.shade700)),
+                            const SizedBox(height: 8),
+                            OutlinedButton(
+                              onPressed: () => setState(() => _parkingLotsFuture = ParkingLotsApi.fetch()),
+                              child: const Text('Tekrar Dene'),
+                            ),
+                          ],
+                        );
+                      }
+                      final lots = snapLots.data ?? [];
+                      return DropdownButtonFormField<int>(
+                        value: _selectedParkingLotId,
+                        decoration: const InputDecoration(labelText: "Havalimanı", border: OutlineInputBorder()),
+                        items: lots
+                            .map((l) => DropdownMenuItem(
+                                  value: l.parkingLotID,
+                                  child: Text(l.lotName, overflow: TextOverflow.ellipsis),
+                                ))
+                            .toList(),
+                        onChanged: (val) {
+                          setState(() {
+                            _selectedParkingLotId = val;
+                            final found = lots.firstWhere((x) => x.parkingLotID == val, orElse: () => ParkingLotDropdownItem(parkingLotID: val ?? 0, lotName: ''));
+                            _selectedParkingLotName = found.lotName;
+                          });
+                        },
+                        isExpanded: true,
+                        validator: (v) => (v == null) ? "Zorunlu" : null,
+                      );
+                    },
                   ),
                   const SizedBox(height: 16),
                   TextFormField(
@@ -117,6 +239,10 @@ class _EntryExitScreenState extends State<EntryExitScreen> with SingleTickerProv
                     decoration: const InputDecoration(labelText: "Park Yeri No", border: OutlineInputBorder()),
                     validator: (v) => v!.isEmpty ? "Zorunlu" : null,
                   ),
+                  if (_entryError != null) ...[
+                    const SizedBox(height: 8),
+                    Text(_entryError!, style: TextStyle(color: Colors.red.shade700)),
+                  ]
                 ],
               ),
             ),
@@ -126,26 +252,76 @@ class _EntryExitScreenState extends State<EntryExitScreen> with SingleTickerProv
           TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.orange, foregroundColor: Colors.white),
-            onPressed: () {
-              if (_entryFormKey.currentState!.validate()) {
-                setState(() {
-                  _parkedVehicles.insert(0, {
-                    'id': DateTime.now().millisecondsSinceEpoch.toString(),
-                    'plate': _plateController.text,
-                    'vehicleType': _selectedVehicleType,
-                    'ownerName': _ownerNameController.text,
-                    'ownerPhone': _phoneController.text,
-                    'entryTime': DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now()),
-                    'spotNumber': _spotController.text,
-                    'airportName': _selectedAirport,
-                    'parkingLotName': 'A Terminali Otopark', // Varsayılan
-                    'status': 'parked'
-                  });
-                });
-                Navigator.pop(context);
-              }
-            },
-            child: const Text("Giriş Yap"),
+            onPressed: _isSubmittingEntry
+                ? null
+                : () async {
+                    debugPrint('ENTRY_BUTTON_CLICKED');
+                    final valid = _entryFormKey.currentState!.validate();
+                    if (!valid) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Lütfen zorunlu alanları doldurun'), backgroundColor: Colors.orange),
+                      );
+                      return;
+                    }
+                    setState(() {
+                      _isSubmittingEntry = true;
+                      _entryError = null;
+                    });
+                    final payload = {
+                      'plateNumber': _plateController.text.trim(),
+                      'typeId': _selectedVehicleTypeId,
+                      'ownerFullName': _ownerNameController.text.trim(),
+                      'ownerPhone': _phoneController.text.trim(),
+                      'parkingLotId': _selectedParkingLotId,
+                      'spotNumber': _spotController.text.trim(),
+                    };
+                    debugPrint('ENTRY_REQUEST_PAYLOAD=$payload');
+                    try {
+                      final result = await ParkingApiService.createParkingEntry(
+                        plateNumber: _plateController.text.trim(),
+                        typeId: _selectedVehicleTypeId!,
+                        ownerFullName: _ownerNameController.text.trim(),
+                        ownerPhone: _phoneController.text.trim(),
+                        parkingLotId: _selectedParkingLotId!,
+                        spotNumber: _spotController.text.trim(),
+                      );
+                      debugPrint('ENTRY_RESPONSE_DATA=$result');
+                      setState(() {
+                        _parkedVehicles.insert(0, {
+                          'id': (result['ParkingReservationID'] ?? DateTime.now().millisecondsSinceEpoch).toString(),
+                          'plate': _plateController.text,
+                          'vehicleType': _selectedVehicleTypeName,
+                          'ownerName': _ownerNameController.text,
+                          'ownerPhone': _phoneController.text,
+                          'entryTime': DateFormat('yyyy-MM-dd HH:mm').format(DateTime.now()),
+                          'spotNumber': _spotController.text,
+                          'parkingLotID': _selectedParkingLotId,
+                          'parkingLotName': _selectedParkingLotName,
+                          'status': 'parked'
+                        });
+                      });
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(content: Text('Giriş başarılı'), backgroundColor: Colors.green),
+                      );
+                      Navigator.pop(context);
+                      _loadParked();
+                    } catch (e) {
+                      final msg = e.toString();
+                      setState(() {
+                        _entryError = msg;
+                        _isSubmittingEntry = false;
+                      });
+                      final lower = msg.toLowerCase();
+                      final userMsg = lower.contains('spot_occupied')
+                          ? 'Seçilen park yeri dolu'
+                          : msg.replaceFirst('Exception: ', '');
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        SnackBar(content: Text(userMsg), backgroundColor: Colors.red),
+                      );
+                      debugPrint('ENTRY_RESPONSE_ERROR=$msg');
+                    }
+                  },
+            child: _isSubmittingEntry ? const SizedBox(height: 16, width: 16, child: CircularProgressIndicator(strokeWidth: 2)) : const Text("Giriş Yap"),
           ),
         ],
       ),
@@ -154,58 +330,169 @@ class _EntryExitScreenState extends State<EntryExitScreen> with SingleTickerProv
 
   // --- ÇIKIŞ İŞLEMİ (Hesaplama) ---
   void _showExitDialog(Map<String, dynamic> vehicle) {
-    // Süre Hesapla
-    final entryDate = DateFormat('yyyy-MM-dd HH:mm').parse(vehicle['entryTime']);
-    final now = DateTime.now();
-    final diff = now.difference(entryDate);
-    final hours = diff.inHours;
-    final minutes = diff.inMinutes % 60;
-    final durationText = "$hours saat $minutes dakika";
-    final amount = max(20, hours * 15.0).toDouble(); // Örnek fiyatlandırma
+    final plate = vehicle['plate'] as String;
+    Future<ExitPopupInfo> popupFuture = ParkingApiService.getExitPopupInfo(plate);
 
+    String? selectedPayment;
+
+    ExitPopupInfo? infoRef;
+    bool isCheckingOut = false;
+    String? checkoutError;
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Araç Çıkışı"),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _InfoRow(label: "Plaka", value: vehicle['plate']),
-            _InfoRow(label: "Sahibi", value: vehicle['ownerName']),
-            _InfoRow(label: "Giriş Saati", value: vehicle['entryTime']),
-            const Divider(),
-            _InfoRow(label: "Kalış Süresi", value: durationText, isBold: true),
-            _InfoRow(label: "Ödeme Tutarı", value: "$amount ₺", isBold: true, valueColor: Colors.orange),
-            const SizedBox(height: 16),
-            const Text("Ödeme Yöntemi", style: TextStyle(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 8),
-            Row(
+      builder: (context) => StatefulBuilder(
+        builder: (context, setStateDialog) {
+          return AlertDialog(
+            title: const Text("Araç Çıkışı"),
+            content: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Expanded(child: OutlinedButton.icon(onPressed: (){}, icon: const Icon(Icons.money), label: const Text("Nakit"))),
-                const SizedBox(width: 8),
-                Expanded(child: OutlinedButton.icon(onPressed: (){}, icon: const Icon(Icons.credit_card), label: const Text("Kart"))),
+                FutureBuilder<ExitPopupInfo>(
+                  future: popupFuture,
+                  builder: (context, snapshot) {
+                    if (snapshot.connectionState == ConnectionState.waiting) {
+                      return const Padding(
+                        padding: EdgeInsets.symmetric(vertical: 8.0),
+                        child: SizedBox(height: 24, width: 24, child: CircularProgressIndicator(strokeWidth: 2)),
+                      );
+                    }
+                    if (snapshot.hasError) {
+                      return Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(snapshot.error.toString(), style: TextStyle(color: Colors.red.shade700)),
+                          const SizedBox(height: 8),
+                          ElevatedButton(
+                            onPressed: () {
+                              setStateDialog(() {
+                                popupFuture = ParkingApiService.getExitPopupInfo(plate);
+                              });
+                            },
+                            child: const Text("Tekrar Dene"),
+                          )
+                        ],
+                      );
+                    }
+                    final info = snapshot.data!;
+                    infoRef = info;
+                    final entryTimeStr = DateFormat('HH:mm').format(info.checkInTime);
+                    final mins = info.durationMinutes;
+                    final durStr = mins < 60
+                        ? "${mins}Ydk"
+                        : "${(mins ~/ 60)}s ${(mins % 60)}Ydk";
+                    return Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        _InfoRow(label: "Plaka", value: info.plateNumber),
+                        _InfoRow(label: "Sahibi", value: info.ownerName),
+                        _InfoRow(label: "Giriş Saati", value: entryTimeStr),
+                        const Divider(),
+                        _InfoRow(label: "Kalış Süresi", value: durStr, isBold: true),
+                        _InfoRow(label: "Ödeme Tutarı", value: "₺${info.amount.toStringAsFixed(2)}", isBold: true, valueColor: Colors.green),
+                      ],
+                    );
+                  },
+                ),
+                const SizedBox(height: 16),
+                const Text("Ödeme Yöntemi", style: TextStyle(fontWeight: FontWeight.bold)),
+                const SizedBox(height: 8),
+                RadioListTile<String>(
+                  title: const Text("Nakit"),
+                  value: "Nakit",
+                  groupValue: selectedPayment,
+                  onChanged: (val) => setStateDialog(() => selectedPayment = val),
+                ),
+                RadioListTile<String>(
+                  title: const Text("Kart"),
+                  value: "Kart",
+                  groupValue: selectedPayment,
+                  onChanged: (val) => setStateDialog(() => selectedPayment = val),
+                ),
+                if (checkoutError != null) ...[
+                  const SizedBox(height: 8),
+                  Text(checkoutError!, style: TextStyle(color: Colors.red.shade700)),
+                  const SizedBox(height: 8),
+                  OutlinedButton(
+                    onPressed: () async {
+                      if (infoRef == null || selectedPayment == null) return;
+                      setStateDialog(() {
+                        checkoutError = null;
+                        isCheckingOut = true;
+                      });
+                      try {
+                        await ParkingApiService.checkoutVehicle(
+                          plateNumber: infoRef!.plateNumber,
+                          amount: infoRef!.amount,
+                          paymentMethod: selectedPayment!,
+                        );
+                        if (!context.mounted) return;
+                        Navigator.pop(context);
+                        _loadParked();
+                        _loadRecentExits();
+                      } catch (e) {
+                        setStateDialog(() {
+                          checkoutError = e.toString();
+                        });
+                      } finally {
+                        setStateDialog(() {
+                          isCheckingOut = false;
+                        });
+                      }
+                    },
+                    child: const Text("Tekrar Dene"),
+                  )
+                ]
               ],
-            )
-          ],
-        ),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
-          ElevatedButton(
-            style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
-            onPressed: () {
-              setState(() {
-                _parkedVehicles.removeWhere((v) => v['id'] == vehicle['id']);
-                _recentExits.insert(0, {...vehicle, 'status': 'exited'});
-              });
-              Navigator.pop(context);
-              ScaffoldMessenger.of(context).showSnackBar(
-                const SnackBar(content: Text("Çıkış işlemi tamamlandı"), backgroundColor: Colors.green),
-              );
-            },
-            child: const Text("Çıkış Yap"),
-          ),
-        ],
+            ),
+            actions: [
+              TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
+              ElevatedButton(
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.red, foregroundColor: Colors.white),
+                onPressed: isCheckingOut
+                    ? null
+                    : () async {
+                        if (selectedPayment == null || infoRef == null) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(content: Text("Ödeme yöntemi ve bilgi yüklemesi gerekli"), backgroundColor: Colors.orange),
+                          );
+                          return;
+                        }
+                        setStateDialog(() {
+                          checkoutError = null;
+                          isCheckingOut = true;
+                        });
+                        try {
+                          await ParkingApiService.checkoutVehicle(
+                            plateNumber: infoRef!.plateNumber,
+                            amount: infoRef!.amount,
+                            paymentMethod: selectedPayment!,
+                          );
+                          if (!context.mounted) return;
+                          Navigator.pop(context);
+                          _loadParked();
+                          _loadRecentExits();
+                        } catch (e) {
+                          setStateDialog(() {
+                            checkoutError = e.toString();
+                          });
+                        } finally {
+                          setStateDialog(() {
+                            isCheckingOut = false;
+                          });
+                        }
+                      },
+                child: isCheckingOut
+                    ? const SizedBox(
+                        height: 18,
+                        width: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
+                      )
+                    : const Text("Çıkış Yap"),
+              ),
+            ],
+          );
+        },
       ),
     );
   }
@@ -268,16 +555,83 @@ class _EntryExitScreenState extends State<EntryExitScreen> with SingleTickerProv
                 controller: _tabController,
                 children: [
                   // 1. PARK HALİNDEKİLER
-                  _VehicleGrid(
-                      vehicles: _parkedVehicles,
-                      isParked: true,
-                      onAction: (v) => _showExitDialog(v)
+                  FutureBuilder<List<CurrentlyParkedVehicleModel>>(
+                    future: _parkedFuture,
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      if (snapshot.hasError) {
+                        return Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text('Veri alınamadı', style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 8),
+                            Text(snapshot.error.toString(), style: TextStyle(color: Colors.grey.shade600, fontSize: 12), textAlign: TextAlign.center),
+                            const SizedBox(height: 12),
+                            ElevatedButton(onPressed: _loadParked, child: const Text('Tekrar Dene')),
+                          ],
+                        );
+                      }
+                      final data = snapshot.data ?? [];
+                      final vehicles = data.map((e) {
+                        return {
+                          'id': '${e.plateNumber}-${e.checkInTime.toIso8601String()}',
+                          'plate': e.plateNumber,
+                          'vehicleType': e.vehicleType,
+                          'ownerName': e.ownerName,
+                          'entryTime': _formatDateTime(e.checkInTime),
+                          'spotNumber': e.spotCode,
+                          'parkingLotName': e.parkingLot,
+                          'status': 'parked',
+                        };
+                      }).toList();
+                      return _VehicleGrid(
+                        vehicles: vehicles,
+                        isParked: true,
+                        onAction: (v) => _showExitDialog(v),
+                      );
+                    },
                   ),
                   // 2. SON ÇIKIŞLAR
-                  _VehicleGrid(
-                      vehicles: _recentExits,
-                      isParked: false,
-                      onAction: (v) {} // Çıkış yapmış araca işlem yok
+                  FutureBuilder<List<ExitPanelCard>>(
+                    future: _recentExitsFuture,
+                    builder: (context, snapshot) {
+                      if (snapshot.connectionState == ConnectionState.waiting) {
+                        return const Center(child: CircularProgressIndicator());
+                      }
+                      if (snapshot.hasError) {
+                        return Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text('Veri alınamadı', style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold)),
+                            const SizedBox(height: 8),
+                            Text(snapshot.error.toString(), style: TextStyle(color: Colors.grey.shade600, fontSize: 12), textAlign: TextAlign.center),
+                            const SizedBox(height: 12),
+                            ElevatedButton(onPressed: _loadRecentExits, child: const Text('Tekrar Dene')),
+                          ],
+                        );
+                      }
+                      final data = snapshot.data ?? [];
+                      final vehicles = data.map((e) {
+                        final ownerText = e.owner.trim().isEmpty ? '-' : e.owner;
+                        final locationText = e.location.trim().isEmpty ? '-' : e.location;
+                        return {
+                          'id': '${e.plateNumber}-${(e.exitTime ?? DateTime.now()).toIso8601String()}',
+                          'plate': e.plateNumber,
+                          'vehicleType': e.vehicleType,
+                          'ownerName': ownerText,
+                          'entryTime': e.entryTime != null ? _formatDateTime(e.entryTime!) : '-',
+                          'parkingLotName': locationText,
+                          'status': e.status.isNotEmpty ? e.status : 'Çıkış Yapıldı',
+                        };
+                      }).toList();
+                      return _VehicleGrid(
+                        vehicles: vehicles,
+                        isParked: false,
+                        onAction: (v) {},
+                      );
+                    },
                   ),
                 ],
               ),
@@ -345,7 +699,7 @@ class _VehicleGrid extends StatelessWidget {
                             borderRadius: BorderRadius.circular(12)
                         ),
                         child: Text(
-                            isParked ? vehicle['spotNumber'] : "Çıkış Yapıldı",
+                            isParked ? vehicle['spotNumber'] : (vehicle['status'] ?? 'Çıkış Yapıldı'),
                             style: TextStyle(
                                 fontSize: 11,
                                 fontWeight: FontWeight.bold,
