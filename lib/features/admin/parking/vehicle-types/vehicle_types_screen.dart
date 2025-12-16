@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
+import '../../../../core/services/admin_service.dart';
+import '../../../../core/services/auth_service.dart';
 
 class VehicleTypesScreen extends StatefulWidget {
   const VehicleTypesScreen({super.key});
@@ -10,6 +12,9 @@ class VehicleTypesScreen extends StatefulWidget {
 
 class _VehicleTypesScreenState extends State<VehicleTypesScreen> {
   // --- STATE ---
+  final AdminService _adminService = AdminService();
+  bool _isLoading = true;
+  List<VehicleType> _vehicleTypes = [];
   int _currentPage = 0;
   final int _itemsPerPage = 10;
   String _searchTerm = "";
@@ -19,37 +24,49 @@ class _VehicleTypesScreenState extends State<VehicleTypesScreen> {
   final TextEditingController _typeNameController = TextEditingController();
   final TextEditingController _multiplierController = TextEditingController();
 
-  // --- MOCK VERİLER (React'ten alındı) ---
-  List<Map<String, dynamic>> _vehicleTypes = [
-    {'typeID': 1, 'typeName': 'Otomobil', 'priceMultiplier': 1.0},
-    {'typeID': 2, 'typeName': 'SUV', 'priceMultiplier': 1.3},
-    {'typeID': 3, 'typeName': 'Minibüs', 'priceMultiplier': 1.5},
-    {'typeID': 4, 'typeName': 'Motosiklet', 'priceMultiplier': 0.7},
-    {'typeID': 5, 'typeName': 'Kamyonet', 'priceMultiplier': 1.8},
-    // Sayfalama için veri çoğaltalım
-    ...List.generate(10, (index) => {
-      'typeID': 6 + index,
-      'typeName': 'Özel Araç ${index + 1}',
-      'priceMultiplier': 1.0 + (index * 0.1)
-    }),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _loadVehicleTypes();
+  }
+
+  /// API'den araç tiplerini yükle
+  Future<void> _loadVehicleTypes() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final vehicleTypes = await _adminService.getVehicleTypes();
+      setState(() {
+        _vehicleTypes = vehicleTypes;
+        _isLoading = false;
+      });
+    } catch (e) {
+      debugPrint('❌ Error loading vehicle types: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
 
   // --- FİLTRELEME ---
-  List<Map<String, dynamic>> get _filteredTypes {
+  List<VehicleType> get _filteredTypes {
     return _vehicleTypes.where((t) {
-      return t['typeName'].toString().toLowerCase().contains(_searchTerm.toLowerCase());
+      return (t.typeName?.toLowerCase().contains(_searchTerm.toLowerCase()) ?? false);
     }).toList();
   }
 
   // --- CRUD İŞLEMLERİ ---
 
-  void _showTypeDialog({Map<String, dynamic>? type}) {
+  void _showTypeDialog({VehicleType? type}) {
     // Düzenleme modunda olup olmadığımızı kontrol eden değişken
     final bool isEditing = type != null;
 
     if (isEditing) {
-      _typeNameController.text = type!['typeName'];
-      _multiplierController.text = type['priceMultiplier'].toString();
+                  final vehicleType = type; // isEditing true ise type null değil
+      _typeNameController.text = vehicleType.typeName ?? '';
+      _multiplierController.text = vehicleType.priceMultiplier?.toString() ?? '1.0';
     } else {
       _typeNameController.clear();
       _multiplierController.text = "1.0";
@@ -71,8 +88,8 @@ class _VehicleTypesScreenState extends State<VehicleTypesScreen> {
                   // --- ARAÇ TİPİ (DÜZENLEME MODUNDA KİLİTLİ) ---
                   TextFormField(
                     controller: _typeNameController,
-                    // Eğer düzenleme yapılıyorsa (isEditing == true) sadece okunur olsun
-                    readOnly: isEditing,
+                    // Düzenleme modunda değiştirilemez (disabled)
+                    enabled: !isEditing,
                     decoration: InputDecoration(
                       labelText: "Araç Tipi",
                       border: const OutlineInputBorder(),
@@ -116,28 +133,98 @@ class _VehicleTypesScreenState extends State<VehicleTypesScreen> {
           ElevatedButton(
             style: ElevatedButton.styleFrom(
                 backgroundColor: Colors.teal, foregroundColor: Colors.white),
-            onPressed: () {
+            onPressed: () async {
               if (_formKey.currentState!.validate()) {
-                setState(() {
-                  if (isEditing) {
-                    // Güncelleme İşlemi
-                    final index = _vehicleTypes
-                        .indexWhere((t) => t['typeID'] == type!['typeID']);
-                    _vehicleTypes[index] = {
-                      'typeID': type!['typeID'],
-                      'typeName': _typeNameController.text, // Değişmese bile controller'dan alabiliriz
-                      'priceMultiplier': double.parse(_multiplierController.text),
-                    };
-                  } else {
-                    // Ekleme İşlemi
-                    _vehicleTypes.insert(0, {
-                      'typeID': DateTime.now().millisecondsSinceEpoch,
-                      'typeName': _typeNameController.text,
-                      'priceMultiplier': double.parse(_multiplierController.text),
-                    });
+                if (isEditing) {
+                  // Güncelleme işlemi
+                  final userId = AuthService().currentUserId;
+                  if (userId == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("Kullanıcı kimliği bulunamadı. Lütfen tekrar giriş yapın."),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                    return;
                   }
-                });
-                Navigator.pop(context);
+
+                  final vehicleType = type; // isEditing true ise type null değil
+                  final priceMultiplier = double.tryParse(_multiplierController.text.trim());
+                  
+                  if (priceMultiplier == null || priceMultiplier <= 0) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(
+                        content: Text("Geçerli bir fiyat çarpanı giriniz (0'dan büyük olmalı)"),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                    return;
+                  }
+
+                  // Loading dialog göster
+                  if (mounted) {
+                    showDialog(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (loadingContext) => const Center(child: CircularProgressIndicator()),
+                    );
+                  }
+
+                  try {
+                    final success = await _adminService.updateVehicleType(
+                      typeId: vehicleType.typeId!,
+                      priceMultiplier: priceMultiplier,
+                      userId: userId,
+                    );
+
+                    // Loading dialog'u kapat
+                    if (mounted) {
+                      Navigator.of(context, rootNavigator: true).pop();
+                    }
+
+                    if (success) {
+                      // Dialog'u kapat
+                      Navigator.pop(context);
+                      // Başarılı mesajı göster
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text("Araç tipi başarıyla güncellendi"),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
+                      // Listeyi yenile
+                      _loadVehicleTypes();
+                    } else {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text("Araç tipi güncellenirken bir hata oluştu"),
+                          backgroundColor: Colors.red,
+                        ),
+                      );
+                    }
+                  } catch (e) {
+                    // Loading dialog'u kapat
+                    if (mounted) {
+                      Navigator.of(context, rootNavigator: true).pop();
+                    }
+                    
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text("Hata: ${e.toString()}"),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                } else {
+                  // TODO: Ekleme işlemi (henüz implement edilmedi)
+                  Navigator.pop(context);
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text("Yeni araç tipi ekleme işlemi yakında aktif olacak"),
+                      backgroundColor: Colors.orange,
+                    ),
+                  );
+                }
               }
             },
             child: Text(isEditing ? "Güncelle" : "Ekle"),
@@ -147,28 +234,16 @@ class _VehicleTypesScreenState extends State<VehicleTypesScreen> {
     );
   }
 
-  void _deleteType(int id) {
-    showDialog(
-      context: context,
-      builder: (context) => AlertDialog(
-        title: const Text("Emin misiniz?"),
-        content: const Text("Bu araç tipini silmek istediğinizden emin misiniz?"),
-        actions: [
-          TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
-          TextButton(
-            onPressed: () {
-              setState(() => _vehicleTypes.removeWhere((t) => t['typeID'] == id));
-              Navigator.pop(context);
-            },
-            child: const Text("Sil", style: TextStyle(color: Colors.red)),
-          ),
-        ],
-      ),
-    );
-  }
 
   @override
   Widget build(BuildContext context) {
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: const Color(0xFFF9FAFB),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
     // Sayfalama
     final filtered = _filteredTypes;
     final totalPages = (filtered.length / _itemsPerPage).ceil();
@@ -185,28 +260,12 @@ class _VehicleTypesScreenState extends State<VehicleTypesScreen> {
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             // --- HEADER ---
-            Row(
-              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            const Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text("Araç Tipleri", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black87)),
-                    SizedBox(height: 4),
-                    Text("Araç sınıflarını ve fiyat çarpanlarını yönetin", style: TextStyle(color: Colors.grey)),
-                  ],
-                ),
-                ElevatedButton.icon(
-                  onPressed: () => _showTypeDialog(),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.teal,
-                    foregroundColor: Colors.white,
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
-                  ),
-                  icon: const Icon(Icons.add),
-                  label: const Text("Yeni Araç Tipi"),
-                ),
+                Text("Araç Tipleri", style: TextStyle(fontSize: 24, fontWeight: FontWeight.bold, color: Colors.black87)),
+                SizedBox(height: 4),
+                Text("Araç sınıflarını ve fiyat çarpanlarını yönetin", style: TextStyle(color: Colors.grey)),
               ],
             ),
 
@@ -251,7 +310,6 @@ class _VehicleTypesScreenState extends State<VehicleTypesScreen> {
                       return _VehicleTypeCard(
                         type: currentData[index],
                         onEdit: () => _showTypeDialog(type: currentData[index]),
-                        onDelete: () => _deleteType(currentData[index]['typeID']),
                       );
                     },
                   );
@@ -277,11 +335,10 @@ class _VehicleTypesScreenState extends State<VehicleTypesScreen> {
 
 // --- ARAÇ TİPİ KARTI ---
 class _VehicleTypeCard extends StatelessWidget {
-  final Map<String, dynamic> type;
+  final VehicleType type;
   final VoidCallback onEdit;
-  final VoidCallback onDelete;
 
-  const _VehicleTypeCard({required this.type, required this.onEdit, required this.onDelete});
+  const _VehicleTypeCard({required this.type, required this.onEdit});
 
   @override
   Widget build(BuildContext context) {
@@ -302,7 +359,7 @@ class _VehicleTypeCard extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  type['typeName'],
+                  type.typeName ?? 'N/A',
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87),
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -310,7 +367,7 @@ class _VehicleTypeCard extends StatelessWidget {
               Container(
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(color: Colors.teal.shade50, borderRadius: BorderRadius.circular(4)),
-                child: Text("ID: ${type['typeID']}", style: TextStyle(fontSize: 11, color: Colors.teal.shade700)),
+                child: Text("ID: ${type.typeId ?? 'N/A'}", style: TextStyle(fontSize: 11, color: Colors.teal.shade700)),
               ),
             ],
           ),
@@ -322,7 +379,7 @@ class _VehicleTypeCard extends StatelessWidget {
               const Icon(Icons.price_change, size: 18, color: Colors.grey),
               const SizedBox(width: 8),
               Text(
-                  "Çarpan: x${type['priceMultiplier']}",
+                  "Çarpan: x${type.priceMultiplier ?? 'N/A'}",
                   style: const TextStyle(fontSize: 14, fontWeight: FontWeight.w600, color: Colors.black87)
               ),
             ],
@@ -334,8 +391,6 @@ class _VehicleTypeCard extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
               InkWell(onTap: onEdit, child: const Icon(Icons.edit, size: 20, color: Colors.teal)),
-              const SizedBox(width: 16),
-              InkWell(onTap: onDelete, child: const Icon(Icons.delete_outline, size: 20, color: Colors.red)),
             ],
           ),
         ],

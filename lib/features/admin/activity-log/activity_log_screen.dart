@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
+import '../../../core/services/admin_service.dart';
 
 class ActivityLogScreen extends StatefulWidget {
   const ActivityLogScreen({super.key});
@@ -10,13 +11,44 @@ class ActivityLogScreen extends StatefulWidget {
 
 class _ActivityLogScreenState extends State<ActivityLogScreen> {
   // --- STATE ---
+  final AdminService _adminService = AdminService();
+  bool _isLoading = true;
+  List<ActivityLog> _logs = [];
   int _currentPage = 0;
   final int _itemsPerPage = 10;
   String _searchTerm = "";
   String _dateFilter = ""; // "YYYY-MM-DD" formatında tutulacak
 
-  // --- MOCK VERİLER (React'ten) ---
-  final List<Map<String, dynamic>> _logs = [
+  @override
+  void initState() {
+    super.initState();
+    _loadActivityLogs();
+  }
+
+  /// API'den aktivite loglarını yükle
+  Future<void> _loadActivityLogs() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final logs = await _adminService.getActivityLogs();
+      debugPrint('📥 Activity logs loaded: ${logs.length} items');
+      
+      setState(() {
+        _logs = logs;
+        _isLoading = false;
+      });
+    } catch (e) {
+      debugPrint('❌ Error loading activity logs: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  // --- MOCK VERİLER (KALDIRILDI) ---
+  /* final List<Map<String, dynamic>> _logs = [
     {'id': 1, 'userName': 'Ahmet Yılmaz', 'action': 'Kullanıcı Ekleme', 'description': 'Yeni kullanıcı eklendi: ayse.demir@example.com', 'logDate': '2024-01-15 10:30:45'},
     {'id': 2, 'userName': 'Mehmet Kaya', 'action': 'Uçuş Güncelleme', 'description': 'FL001 uçuşu Delayed olarak güncellendi', 'logDate': '2024-01-15 11:15:22'},
     {'id': 3, 'userName': 'Fatma Şahin', 'action': 'Rezervasyon İptali', 'description': 'RES-12345 rezervasyonu iptal edildi', 'logDate': '2024-01-15 12:45:10'},
@@ -33,16 +65,17 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
       'description': 'Günlük veritabanı yedeği alındı.',
       'logDate': '2024-01-${16 + index} 03:00:00'
     }),
-  ];
+  ]; */
 
   // --- FİLTRELEME ---
-  List<Map<String, dynamic>> get _filteredLogs {
+  List<ActivityLog> get _filteredLogs {
     return _logs.where((log) {
-      final matchesSearch = log['userName'].toString().toLowerCase().contains(_searchTerm.toLowerCase()) ||
-          log['action'].toString().toLowerCase().contains(_searchTerm.toLowerCase()) ||
-          log['description'].toString().toLowerCase().contains(_searchTerm.toLowerCase());
+      final matchesSearch = (log.userName ?? '').toLowerCase().contains(_searchTerm.toLowerCase()) ||
+          (log.action ?? '').toLowerCase().contains(_searchTerm.toLowerCase()) ||
+          (log.description ?? '').toLowerCase().contains(_searchTerm.toLowerCase());
 
-      final matchesDate = _dateFilter.isEmpty || log['logDate'].toString().startsWith(_dateFilter);
+      final logDateStr = log.logDate ?? '';
+      final matchesDate = _dateFilter.isEmpty || logDateStr.startsWith(_dateFilter);
 
       return matchesSearch && matchesDate;
     }).toList();
@@ -50,11 +83,16 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
 
   // Tarih Seçici
   Future<void> _selectDate(BuildContext context) async {
+    final now = DateTime.now();
+    final safeInitialDate = now.isAfter(DateTime(2030, 12, 31))
+        ? DateTime(2030, 12, 31)
+        : now;
+    
     final DateTime? picked = await showDatePicker(
       context: context,
-      initialDate: DateTime.now(),
+      initialDate: safeInitialDate,
       firstDate: DateTime(2023),
-      lastDate: DateTime.now(),
+      lastDate: DateTime(2030, 12, 31),
     );
     if (picked != null) {
       setState(() {
@@ -156,10 +194,14 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
             const SizedBox(height: 24),
 
             // --- LOG KARTLARI (Responsive Grid) ---
-            if (currentData.isEmpty)
-              const Center(child: Padding(padding: EdgeInsets.all(40), child: Text("Kayıt bulunamadı.")))
-            else
-              LayoutBuilder(
+            _isLoading
+                ? const Center(
+                    child: Padding(
+                        padding: EdgeInsets.all(40),
+                        child: CircularProgressIndicator()))
+                : currentData.isEmpty
+                    ? const Center(child: Padding(padding: EdgeInsets.all(40), child: Text("Kayıt bulunamadı.")))
+                    : LayoutBuilder(
                 builder: (context, constraints) {
                   // Loglar genellikle uzun açıklamalı olduğu için 2 sütun ideal
                   int crossAxisCount = constraints.maxWidth > 900 ? 2 : 1;
@@ -211,7 +253,7 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
 
 // --- LOG KARTI ---
 class _LogCard extends StatelessWidget {
-  final Map<String, dynamic> log;
+  final ActivityLog log;
   const _LogCard({required this.log});
 
   @override
@@ -240,7 +282,7 @@ class _LogCard extends StatelessWidget {
                     child: Icon(Icons.history, size: 18, color: Colors.teal.shade700),
                   ),
                   const SizedBox(width: 8),
-                  Text("#${log['id']}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
+                  Text("#${log.logId ?? 'N/A'}", style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 14)),
                 ],
               ),
               Container(
@@ -250,7 +292,7 @@ class _LogCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
-                  log['action'],
+                  log.action ?? 'N/A',
                   style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.teal.shade700),
                 ),
               ),
@@ -265,9 +307,9 @@ class _LogCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisAlignment: MainAxisAlignment.center,
               children: [
-                _InfoRow(icon: Icons.person_outline, text: log['userName'], isBold: true),
+                _InfoRow(icon: Icons.person_outline, text: log.userName ?? 'N/A', isBold: true),
                 const SizedBox(height: 6),
-                _InfoRow(icon: Icons.info_outline, text: log['description']),
+                _InfoRow(icon: Icons.info_outline, text: log.description ?? 'N/A'),
               ],
             ),
           ),
@@ -280,7 +322,7 @@ class _LogCard extends StatelessWidget {
               Icon(Icons.calendar_today, size: 14, color: Colors.grey.shade500),
               const SizedBox(width: 6),
               Text(
-                log['logDate'],
+                log.logDate ?? 'N/A',
                 style: TextStyle(fontSize: 12, color: Colors.grey.shade600),
               ),
             ],

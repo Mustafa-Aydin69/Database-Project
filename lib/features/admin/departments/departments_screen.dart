@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'dart:math';
+import '../../../core/services/admin_service.dart';
+import '../../../core/services/auth_service.dart';
 
 class DepartmentsScreen extends StatefulWidget {
   const DepartmentsScreen({super.key});
@@ -10,6 +12,9 @@ class DepartmentsScreen extends StatefulWidget {
 
 class _DepartmentsScreenState extends State<DepartmentsScreen> {
   // --- STATE ---
+  final AdminService _adminService = AdminService();
+  bool _isLoading = true;
+  List<Department> _departments = [];
   int _currentPage = 0;
   final int _itemsPerPage = 10;
 
@@ -17,39 +22,47 @@ class _DepartmentsScreenState extends State<DepartmentsScreen> {
   final _formKey = GlobalKey<FormState>();
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _descController = TextEditingController();
-  final TextEditingController _managerController = TextEditingController();
-  final TextEditingController _empCountController = TextEditingController();
+  final TextEditingController _managerIdController = TextEditingController();
 
-  // --- MOCK VERİLER (React'ten alındı) ---
-  List<Map<String, dynamic>> _departments = [
-    {'id': 1, 'name': 'Uçuş Operasyonları', 'description': 'Uçuş planlaması ve yönetimi', 'manager': 'Ahmet Yılmaz', 'employeeCount': 45},
-    {'id': 2, 'name': 'Yer Hizmetleri', 'description': 'Bagaj ve yolcu hizmetleri', 'manager': 'Ayşe Demir', 'employeeCount': 78},
-    {'id': 3, 'name': 'Teknik Bakım', 'description': 'Uçak bakım ve onarım', 'manager': 'Mehmet Kaya', 'employeeCount': 62},
-    {'id': 4, 'name': 'Güvenlik', 'description': 'Havalimanı güvenlik hizmetleri', 'manager': 'Fatma Şahin', 'employeeCount': 95},
-    {'id': 5, 'name': 'Müşteri Hizmetleri', 'description': 'Yolcu destek ve bilgilendirme', 'manager': 'Ali Öztürk', 'employeeCount': 34},
-    // Sayfalama için veri çoğaltma
-    ...List.generate(10, (index) => {
-      'id': 6 + index,
-      'name': 'Departman ${index + 1}',
-      'description': 'Genel hizmetler departmanı',
-      'manager': 'Yönetici ${index + 1}',
-      'employeeCount': 20 + index
-    }),
-  ];
+  @override
+  void initState() {
+    super.initState();
+    _loadDepartments();
+  }
+
+  /// API'den departman listesini yükle
+  Future<void> _loadDepartments() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final departments = await _adminService.getDepartments();
+      debugPrint('📥 Departments loaded: ${departments.length} items');
+      
+      setState(() {
+        _departments = departments;
+        _isLoading = false;
+      });
+    } catch (e) {
+      debugPrint('❌ Error loading departments: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
 
   // --- CRUD İŞLEMLERİ ---
 
-  void _showDepartmentDialog({Map<String, dynamic>? department}) {
+  void _showDepartmentDialog({Department? department}) {
     if (department != null) {
-      _nameController.text = department['name'];
-      _descController.text = department['description'];
-      _managerController.text = department['manager'];
-      _empCountController.text = department['employeeCount'].toString();
+      _nameController.text = department.departmentName ?? '';
+      _descController.text = department.description ?? '';
+      _managerIdController.text = department.departmentManagerId?.toString() ?? '';
     } else {
       _nameController.clear();
       _descController.clear();
-      _managerController.clear();
-      _empCountController.clear();
+      _managerIdController.clear();
     }
 
     showDialog(
@@ -87,24 +100,18 @@ class _DepartmentsScreenState extends State<DepartmentsScreen> {
                   ),
                   const SizedBox(height: 16),
                   TextFormField(
-                    controller: _managerController,
+                    controller: _managerIdController,
                     decoration: const InputDecoration(
-                      labelText: "Yönetici",
+                      labelText: "Yönetici ID",
                       border: OutlineInputBorder(),
                       prefixIcon: Icon(Icons.person),
                     ),
-                    validator: (v) => v!.isEmpty ? "Zorunlu alan" : null,
-                  ),
-                  const SizedBox(height: 16),
-                  TextFormField(
-                    controller: _empCountController,
-                    decoration: const InputDecoration(
-                      labelText: "Çalışan Sayısı",
-                      border: OutlineInputBorder(),
-                      prefixIcon: Icon(Icons.group),
-                    ),
                     keyboardType: TextInputType.number,
-                    validator: (v) => (v == null || v.isEmpty || int.tryParse(v) == null) ? "Geçerli sayı giriniz" : null,
+                    validator: (v) {
+                      if (v == null || v.isEmpty) return "Zorunlu alan";
+                      if (int.tryParse(v) == null) return "Geçerli sayı giriniz";
+                      return null;
+                    },
                   ),
                 ],
               ),
@@ -118,29 +125,88 @@ class _DepartmentsScreenState extends State<DepartmentsScreen> {
           ),
           ElevatedButton(
             style: ElevatedButton.styleFrom(backgroundColor: Colors.teal, foregroundColor: Colors.white),
-            onPressed: () {
+            onPressed: () async {
               if (_formKey.currentState!.validate()) {
-                setState(() {
-                  if (department != null) {
-                    final index = _departments.indexWhere((d) => d['id'] == department['id']);
-                    _departments[index] = {
-                      'id': department['id'],
-                      'name': _nameController.text,
-                      'description': _descController.text,
-                      'manager': _managerController.text,
-                      'employeeCount': int.parse(_empCountController.text),
-                    };
-                  } else {
-                    _departments.insert(0, {
-                      'id': DateTime.now().millisecondsSinceEpoch,
-                      'name': _nameController.text,
-                      'description': _descController.text,
-                      'manager': _managerController.text,
-                      'employeeCount': int.parse(_empCountController.text),
-                    });
+                if (department != null) {
+                  // Güncelleme işlemi
+                  final userId = AuthService().currentUserId;
+                  if (userId == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Kullanıcı bilgisi bulunamadı')),
+                    );
+                    return;
                   }
-                });
-                Navigator.pop(context);
+
+                  final success = await _adminService.updateDepartment(
+                    departmentId: department.departmentId!,
+                    departmentName: _nameController.text,
+                    description: _descController.text,
+                    departmentManagerId: int.parse(_managerIdController.text),
+                    userId: userId,
+                  );
+
+                  if (success) {
+                    if (mounted) {
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Departman başarıyla güncellendi'),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
+                      _loadDepartments(); // Listeyi yenile
+                    }
+                  } else {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Departman güncellenirken hata oluştu. Lütfen terminal loglarını kontrol edin.'),
+                          backgroundColor: Colors.red,
+                          duration: Duration(seconds: 5),
+                        ),
+                      );
+                    }
+                  }
+                } else {
+                  // Yeni departman ekleme işlemi
+                  final userId = AuthService().currentUserId;
+                  if (userId == null) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      const SnackBar(content: Text('Kullanıcı bilgisi bulunamadı')),
+                    );
+                    return;
+                  }
+
+                  final success = await _adminService.addDepartment(
+                    departmentName: _nameController.text,
+                    description: _descController.text,
+                    departmentManagerId: int.parse(_managerIdController.text),
+                    userId: userId,
+                  );
+
+                  if (success) {
+                    if (mounted) {
+                      Navigator.pop(context);
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Departman başarıyla eklendi'),
+                          backgroundColor: Colors.green,
+                        ),
+                      );
+                      _loadDepartments(); // Listeyi yenile
+                    }
+                  } else {
+                    if (mounted) {
+                      ScaffoldMessenger.of(context).showSnackBar(
+                        const SnackBar(
+                          content: Text('Departman eklenirken hata oluştu. Lütfen terminal loglarını kontrol edin.'),
+                          backgroundColor: Colors.red,
+                          duration: Duration(seconds: 5),
+                        ),
+                      );
+                    }
+                  }
+                }
               }
             },
             child: Text(department != null ? "Güncelle" : "Ekle"),
@@ -159,9 +225,48 @@ class _DepartmentsScreenState extends State<DepartmentsScreen> {
         actions: [
           TextButton(onPressed: () => Navigator.pop(context), child: const Text("İptal")),
           TextButton(
-            onPressed: () {
-              setState(() => _departments.removeWhere((d) => d['id'] == id));
+            onPressed: () async {
               Navigator.pop(context);
+              
+              final userId = AuthService().currentUserId;
+              if (userId == null) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Kullanıcı bilgisi bulunamadı'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                }
+                return;
+              }
+
+              final success = await _adminService.deleteDepartment(
+                departmentId: id,
+                userId: userId,
+              );
+
+              if (success) {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Departman başarıyla silindi'),
+                      backgroundColor: Colors.green,
+                    ),
+                  );
+                  _loadDepartments(); // Listeyi yenile
+                }
+              } else {
+                if (mounted) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Departman silinirken hata oluştu. Lütfen terminal loglarını kontrol edin.'),
+                      backgroundColor: Colors.red,
+                      duration: Duration(seconds: 5),
+                    ),
+                  );
+                }
+              }
             },
             child: const Text("Sil", style: TextStyle(color: Colors.red)),
           ),
@@ -215,32 +320,37 @@ class _DepartmentsScreenState extends State<DepartmentsScreen> {
             const SizedBox(height: 24),
 
             // --- KART LİSTESİ ---
-            if (currentData.isEmpty)
-              const Center(child: Padding(padding: EdgeInsets.all(40), child: Text("Kayıt bulunamadı.")))
-            else
-              LayoutBuilder(
-                builder: (context, constraints) {
-                  int crossAxisCount = constraints.maxWidth > 1100 ? 3 : (constraints.maxWidth > 700 ? 2 : 1);
-                  return GridView.builder(
-                    shrinkWrap: true,
-                    physics: const NeverScrollableScrollPhysics(),
-                    gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                      crossAxisCount: crossAxisCount,
-                      crossAxisSpacing: 16,
-                      mainAxisSpacing: 16,
-                      childAspectRatio: 1.8, // Kart boyutu
-                    ),
-                    itemCount: currentData.length,
-                    itemBuilder: (context, index) {
-                      return _DepartmentCard(
-                        department: currentData[index],
-                        onEdit: () => _showDepartmentDialog(department: currentData[index]),
-                        onDelete: () => _deleteDepartment(currentData[index]['id']),
-                      );
-                    },
-                  );
-                },
-              ),
+            _isLoading
+                ? const Center(
+                    child: Padding(
+                        padding: EdgeInsets.all(40),
+                        child: CircularProgressIndicator()))
+                : currentData.isEmpty
+                    ? const Center(child: Padding(padding: EdgeInsets.all(40), child: Text("Kayıt bulunamadı.")))
+                    : LayoutBuilder(
+                        builder: (context, constraints) {
+                          int crossAxisCount = constraints.maxWidth > 1100 ? 3 : (constraints.maxWidth > 700 ? 2 : 1);
+                          return GridView.builder(
+                            shrinkWrap: true,
+                            physics: const NeverScrollableScrollPhysics(),
+                            gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                              crossAxisCount: crossAxisCount,
+                              crossAxisSpacing: 16,
+                              mainAxisSpacing: 16,
+                              childAspectRatio: 1.8, // Kart boyutu
+                            ),
+                            itemCount: currentData.length,
+                            itemBuilder: (context, index) {
+                              return _DepartmentCard(
+                                key: ValueKey(currentData[index].departmentId ?? index),
+                                department: currentData[index],
+                                onEdit: () => _showDepartmentDialog(department: currentData[index]),
+                                onDelete: () => _deleteDepartment(currentData[index].departmentId ?? 0),
+                              );
+                            },
+                          );
+                        },
+                      ),
 
             // --- SAYFALAMA ---
             const SizedBox(height: 20),
@@ -261,11 +371,11 @@ class _DepartmentsScreenState extends State<DepartmentsScreen> {
 
 // --- DEPARTMAN KARTI ---
 class _DepartmentCard extends StatelessWidget {
-  final Map<String, dynamic> department;
+  final Department department;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
-  const _DepartmentCard({required this.department, required this.onEdit, required this.onDelete});
+  const _DepartmentCard({Key? key, required this.department, required this.onEdit, required this.onDelete}) : super(key: key);
 
   @override
   Widget build(BuildContext context) {
@@ -286,17 +396,9 @@ class _DepartmentCard extends StatelessWidget {
             children: [
               Expanded(
                 child: Text(
-                  department['name'],
+                  department.departmentName ?? 'İsimsiz Departman',
                   style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 16, color: Colors.black87),
                   overflow: TextOverflow.ellipsis,
-                ),
-              ),
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                decoration: BoxDecoration(color: Colors.teal.shade50, borderRadius: BorderRadius.circular(4)),
-                child: Text(
-                  "${department['employeeCount']} Çalışan",
-                  style: TextStyle(fontSize: 11, fontWeight: FontWeight.bold, color: Colors.teal.shade700),
                 ),
               ),
             ],
@@ -308,9 +410,27 @@ class _DepartmentCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                _InfoRow(icon: Icons.description_outlined, text: department['description']),
-                const SizedBox(height: 8),
-                _InfoRow(icon: Icons.person_outline, text: "Yönetici: ${department['manager']}"),
+                Row(
+                  children: [
+                    const Icon(Icons.tag, size: 16, color: Colors.purple),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "DepartmentID: ${department.departmentId ?? 'N/A'}",
+                        style: const TextStyle(fontSize: 12, color: Colors.purple, fontWeight: FontWeight.w500),
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+                if (department.description != null && department.description!.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  _InfoRow(icon: Icons.description_outlined, text: department.description!),
+                ],
+                if (department.manager != null && department.manager!.isNotEmpty) ...[
+                  const SizedBox(height: 8),
+                  _InfoRow(icon: Icons.person_outline, text: "Yönetici: ${department.manager}"),
+                ],
               ],
             ),
           ),

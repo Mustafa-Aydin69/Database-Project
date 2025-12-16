@@ -1,16 +1,68 @@
 import 'package:flutter/material.dart';
+import '../../../core/services/admin_service.dart';
 
-class AdminDashboardScreen extends StatelessWidget {
+class AdminDashboardScreen extends StatefulWidget {
   const AdminDashboardScreen({super.key});
 
   @override
+  State<AdminDashboardScreen> createState() => _AdminDashboardScreenState();
+}
+
+class _AdminDashboardScreenState extends State<AdminDashboardScreen> {
+  final AdminService _adminService = AdminService();
+  bool _isLoading = true;
+  bool _isLoadingFlights = true;
+  AdminDashboardStats _stats = AdminDashboardStats.empty();
+  List<TodayFlight> _todayFlights = [];
+
+  @override
+  void initState() {
+    super.initState();
+    _loadDashboardData();
+  }
+
+  /// API'den dashboard istatistiklerini ve uçuş listesini yükle
+  Future<void> _loadDashboardData() async {
+    setState(() {
+      _isLoading = true;
+      _isLoadingFlights = true;
+    });
+
+    try {
+      final results = await Future.wait([
+        _adminService.getDashboardStats(),
+        _adminService.getTodayFlights(),
+      ]);
+      
+      final stats = results[0] as AdminDashboardStats;
+      final flights = results[1] as List<TodayFlight>;
+      
+      debugPrint('📥 Dashboard stats loaded: todayFlights=${stats.todayFlights}, activeReservations=${stats.activeReservations}, occupiedParkingSpots=${stats.occupiedParkingSpots}, totalRevenue=${stats.totalRevenue}');
+      debugPrint('📥 Today flights loaded: ${flights.length} items');
+      
+      setState(() {
+        _stats = stats;
+        _todayFlights = flights;
+        _isLoading = false;
+        _isLoadingFlights = false;
+      });
+    } catch (e) {
+      debugPrint('❌ Error loading dashboard data: $e');
+      setState(() {
+        _isLoading = false;
+        _isLoadingFlights = false;
+      });
+    }
+  }
+
+  @override
   Widget build(BuildContext context) {
-    // --- MOCK VERİLER (React State'in Karşılığı) ---
+    // --- DİNAMİK VERİLER ---
     final kpiData = {
-      'todayFlights': 47,
-      'activeReservations': 234,
-      'occupiedParkingSpots': 156,
-      'totalRevenue': 1847500,
+      'todayFlights': _stats.todayFlights,
+      'activeReservations': _stats.activeReservations,
+      'occupiedParkingSpots': _stats.occupiedParkingSpots,
+      'totalRevenue': _stats.totalRevenue,
     };
 
     final stats = [
@@ -38,19 +90,22 @@ class AdminDashboardScreen extends StatelessWidget {
       {
         'icon': Icons.currency_lira, // Dolar ikonu yerine TL
         'label': 'Toplam Gelir',
-        'value': "₺${_formatMoney(kpiData['totalRevenue'] as int)}",
+        'value': "₺${_formatMoney((kpiData['totalRevenue'] as num).toInt())}",
         'color': Colors.green,
         'change': '+15%',
       },
     ];
 
-    final todayFlights = [
-      {'id': 'FL001', 'flightNo': 'TK101', 'departure': 'IST', 'arrival': 'AYT', 'time': '10:30', 'status': 'Zamanında'},
-      {'id': 'FL002', 'flightNo': 'TK205', 'departure': 'IST', 'arrival': 'ADB', 'time': '11:45', 'status': 'Gecikti'},
-      {'id': 'FL003', 'flightNo': 'TK301', 'departure': 'IST', 'arrival': 'ESB', 'time': '12:15', 'status': 'Zamanında'},
-      {'id': 'FL004', 'flightNo': 'TK405', 'departure': 'IST', 'arrival': 'TZX', 'time': '13:00', 'status': 'Biniş'},
-      {'id': 'FL005', 'flightNo': 'TK501', 'departure': 'IST', 'arrival': 'DLM', 'time': '14:20', 'status': 'Zamanında'},
-    ];
+    // API'den gelen uçuş listesini formatla
+    final List<Map<String, String>> todayFlights = _todayFlights.map((flight) {
+      return <String, String>{
+        'id': flight.id,
+        'flightNo': flight.flightNo,
+        'departure': flight.departure,
+        'arrival': flight.arrival,
+        'status': flight.status,
+      };
+    }).toList();
 
     final recentReservations = [
       {'id': 'R001', 'passenger': 'Ahmet Yılmaz', 'flightNo': 'TK101', 'date': '15 Oca 2024', 'status': 'Onaylandı'},
@@ -79,34 +134,41 @@ class AdminDashboardScreen extends StatelessWidget {
             const SizedBox(height: 24),
 
             // --- İSTATİSTİK KARTLARI (Responsive Grid) ---
-            LayoutBuilder(
-              builder: (context, constraints) {
-                // Ekran genişliğine göre kolon sayısını belirle
-                int crossAxisCount = constraints.maxWidth > 1100 ? 4 : (constraints.maxWidth > 600 ? 2 : 1);
+            _isLoading
+                ? const Center(
+                    child: Padding(
+                        padding: EdgeInsets.all(40),
+                        child: CircularProgressIndicator()))
+                : LayoutBuilder(
+                    builder: (context, constraints) {
+                      // Ekran genişliğine göre kolon sayısını belirle
+                      int crossAxisCount = constraints.maxWidth > 1100
+                          ? 4
+                          : (constraints.maxWidth > 600 ? 2 : 1);
 
-                return GridView.builder(
-                  shrinkWrap: true, // ScrollView içinde olduğu için gerekli
-                  physics: const NeverScrollableScrollPhysics(),
-                  gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
-                    crossAxisCount: crossAxisCount,
-                    crossAxisSpacing: 16,
-                    mainAxisSpacing: 16,
-                    childAspectRatio: 1.6, // Kartın en/boy oranı
+                      return GridView.builder(
+                        shrinkWrap: true, // ScrollView içinde olduğu için gerekli
+                        physics: const NeverScrollableScrollPhysics(),
+                        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+                          crossAxisCount: crossAxisCount,
+                          crossAxisSpacing: 16,
+                          mainAxisSpacing: 16,
+                          childAspectRatio: 1.6, // Kartın en/boy oranı
+                        ),
+                        itemCount: stats.length,
+                        itemBuilder: (context, index) {
+                          final item = stats[index];
+                          return _StatCard(
+                            title: item['label'] as String,
+                            value: item['value'] as String,
+                            icon: item['icon'] as IconData,
+                            color: item['color'] as Color,
+                            change: item['change'] as String,
+                          );
+                        },
+                      );
+                    },
                   ),
-                  itemCount: stats.length,
-                  itemBuilder: (context, index) {
-                    final item = stats[index];
-                    return _StatCard(
-                      title: item['label'] as String,
-                      value: item['value'] as String,
-                      icon: item['icon'] as IconData,
-                      color: item['color'] as Color,
-                      change: item['change'] as String,
-                    );
-                  },
-                );
-              },
-            ),
 
             const SizedBox(height: 24),
 
@@ -118,7 +180,13 @@ class AdminDashboardScreen extends StatelessWidget {
                   return Row(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Expanded(child: _FlightsListCard(flights: todayFlights)),
+                      Expanded(
+                          child: _isLoadingFlights
+                              ? const Center(
+                                  child: Padding(
+                                      padding: EdgeInsets.all(40),
+                                      child: CircularProgressIndicator()))
+                              : _FlightsListCard(flights: todayFlights)),
                       const SizedBox(width: 24),
                       Expanded(child: _ReservationsListCard(reservations: recentReservations)),
                     ],
@@ -126,7 +194,12 @@ class AdminDashboardScreen extends StatelessWidget {
                 } else {
                   return Column(
                     children: [
-                      _FlightsListCard(flights: todayFlights),
+                      _isLoadingFlights
+                          ? const Center(
+                              child: Padding(
+                                  padding: EdgeInsets.all(40),
+                                  child: CircularProgressIndicator()))
+                          : _FlightsListCard(flights: todayFlights),
                       const SizedBox(height: 24),
                       _ReservationsListCard(reservations: recentReservations),
                     ],
@@ -231,13 +304,17 @@ class _FlightsListCard extends StatelessWidget {
             child: Text("Bugünkü Uçuşlar", style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18)),
           ),
           const Divider(height: 1),
-          ListView.separated(
-            shrinkWrap: true,
-            physics: const NeverScrollableScrollPhysics(),
-            itemCount: flights.length,
-            separatorBuilder: (_, __) => const SizedBox(height: 12),
-            padding: const EdgeInsets.all(20),
-            itemBuilder: (context, index) {
+          flights.isEmpty
+              ? const Padding(
+                  padding: EdgeInsets.all(40),
+                  child: Center(child: Text("Uçuş bulunamadı.")))
+              : ListView.separated(
+                  shrinkWrap: true,
+                  physics: const NeverScrollableScrollPhysics(),
+                  itemCount: flights.length,
+                  separatorBuilder: (_, __) => const SizedBox(height: 12),
+                  padding: const EdgeInsets.all(20),
+                  itemBuilder: (context, index) {
               final flight = flights[index];
               return Container(
                 padding: const EdgeInsets.all(12),

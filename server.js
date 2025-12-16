@@ -6,6 +6,7 @@ const checkinRoutes = require('./routes/checkin');
 const parkingRoutes = require('./routes/parking');
 const adminFlightMgmtRoutes = require('./routes/admin_flight_management');
 const { getPool, sql } = require('./config/database');
+const adminRoutes = require('./routes/admin');
 
 const app = express();
 const PORT = process.env.PORT || 3000;
@@ -573,6 +574,12 @@ function logRoutes(app) {
     console.log('Route logging failed:', e?.message || e);
   }
 }
+app.use('/api/admin', adminRoutes);
+
+// Debug: Route registration
+console.log('📋 Registered routes:');
+console.log('  - /api/parking/payment-statistics');
+console.log('  - /api/parking/payment-list');
 
 // Health check endpoint
 app.get('/health', (req, res) => {

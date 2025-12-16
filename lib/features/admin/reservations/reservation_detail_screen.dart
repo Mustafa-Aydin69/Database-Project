@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
+import '../../../core/services/admin_service.dart';
 
 class ReservationDetailScreen extends StatefulWidget {
   final String reservationId;
@@ -12,49 +13,102 @@ class ReservationDetailScreen extends StatefulWidget {
 }
 
 class _ReservationDetailScreenState extends State<ReservationDetailScreen> {
-  // --- MOCK DATA (API Yerine) ---
-  late Map<String, dynamic> _reservation;
+  // --- STATE ---
+  final AdminService _adminService = AdminService();
+  bool _isLoading = true;
+  Reservation? _reservation;
 
   @override
   void initState() {
     super.initState();
-    // Gerçek uygulamada burada widget.reservationId ile API isteği atılır.
-    _reservation = {
-      'reservationID': int.tryParse(widget.reservationId) ?? 12345,
-      'userName': 'Ahmet Yılmaz',
-      'userEmail': 'ahmet.yilmaz@email.com',
-      'userPhone': '+90 532 123 4567',
-      'flight': 'TK101 - IST → AYT',
-      'flightNumber': 'TK101',
-      'departure': 'İstanbul Havalimanı (IST)',
-      'arrival': 'Antalya Havalimanı (AYT)',
-      'departureTime': '2024-01-15T14:30:00',
-      'arrivalTime': '2024-01-15T16:15:00',
-      'reservationDate': '2024-01-10T14:30:00',
-      'status': 'Active',
-      'totalAmount': 2550.0,
-      'paymentMethod': 'Kredi Kartı',
-      'bookingReference': 'TK-2024-001234',
-      'passengers': [
-        {'passengerID': 1, 'firstName': 'Ahmet', 'lastName': 'Yılmaz', 'seatNumber': '12A', 'ticketNumber': 'TK-001234-1', 'class': 'Economy'},
-        {'passengerID': 2, 'firstName': 'Ayşe', 'lastName': 'Yılmaz', 'seatNumber': '12B', 'ticketNumber': 'TK-001234-2', 'class': 'Economy'},
-      ],
-    };
+    _loadReservationDetails();
   }
 
-  Color _getStatusColor(String status) {
+  /// API'den rezervasyon detaylarını yükle
+  Future<void> _loadReservationDetails() async {
+    setState(() {
+      _isLoading = true;
+    });
+
+    try {
+      final reservations = await _adminService.getReservations();
+      final reservationId = int.tryParse(widget.reservationId);
+      
+      if (reservationId != null) {
+        final foundReservation = reservations.firstWhere(
+          (r) => r.reservationId == reservationId,
+          orElse: () => reservations.isNotEmpty ? reservations.first : Reservation(),
+        );
+        
+        setState(() {
+          _reservation = foundReservation;
+          _isLoading = false;
+        });
+      } else {
+        setState(() {
+          _isLoading = false;
+        });
+      }
+    } catch (e) {
+      debugPrint('❌ Error loading reservation details: $e');
+      setState(() {
+        _isLoading = false;
+      });
+    }
+  }
+
+  Color _getStatusColor(String? status) {
+    if (status == null) return Colors.grey;
     switch (status) {
-      case 'Active': return Colors.blue;
-      case 'Completed': return Colors.green;
-      case 'Cancelled': return Colors.red;
-      case 'Pending': return Colors.orange;
-      default: return Colors.grey;
+      case 'Active':
+      case 'Confirmed':
+        return Colors.blue;
+      case 'Completed':
+        return Colors.green;
+      case 'Cancelled':
+        return Colors.red;
+      case 'Pending':
+        return Colors.orange;
+      default:
+        return Colors.grey;
     }
   }
 
   @override
   Widget build(BuildContext context) {
-    final statusColor = _getStatusColor(_reservation['status']);
+    if (_isLoading) {
+      return Scaffold(
+        backgroundColor: const Color(0xFFF9FAFB),
+        appBar: AppBar(
+          title: const Text("Rezervasyon Detayı"),
+          backgroundColor: Colors.white,
+          elevation: 1,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.black87),
+            onPressed: () => context.pop(),
+          ),
+        ),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+
+    if (_reservation == null) {
+      return Scaffold(
+        backgroundColor: const Color(0xFFF9FAFB),
+        appBar: AppBar(
+          title: const Text("Rezervasyon Detayı"),
+          backgroundColor: Colors.white,
+          elevation: 1,
+          leading: IconButton(
+            icon: const Icon(Icons.arrow_back, color: Colors.black87),
+            onPressed: () => context.pop(),
+          ),
+        ),
+        body: const Center(child: Text("Rezervasyon bulunamadı.")),
+      );
+    }
+
+    final statusColor = _getStatusColor(_reservation!.reservationStatus);
     final currencyFormat = NumberFormat.currency(locale: 'tr_TR', symbol: '₺');
     final dateFormat = DateFormat('dd MMMM yyyy', 'tr_TR');
     final timeFormat = DateFormat('HH:mm');
@@ -79,7 +133,7 @@ class _ReservationDetailScreenState extends State<ReservationDetailScreen> {
                 borderRadius: BorderRadius.circular(8)
             ),
             child: Text(
-                _reservation['status'],
+                _reservation!.reservationStatus ?? 'N/A',
                 style: TextStyle(color: statusColor, fontWeight: FontWeight.bold)
             ),
           )
@@ -142,19 +196,21 @@ class _ReservationDetailScreenState extends State<ReservationDetailScreen> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         const Text("Kalkış", style: TextStyle(color: Colors.grey, fontSize: 13)),
-                        Text(_reservation['departure'], style: const TextStyle(fontWeight: FontWeight.bold)),
-                        Text(
-                          timeFormat.format(DateTime.parse(_reservation['departureTime'])),
-                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.teal),
-                        ),
-                        Text(dateFormat.format(DateTime.parse(_reservation['departureTime'])), style: const TextStyle(fontSize: 13, color: Colors.grey)),
+                        Text(_reservation!.departureAirport ?? 'N/A', style: const TextStyle(fontWeight: FontWeight.bold)),
+                        if (_reservation!.departureTime != null)
+                          Text(
+                            timeFormat.format(DateTime.parse(_reservation!.departureTime!)),
+                            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.teal),
+                          ),
+                        if (_reservation!.departureTime != null)
+                          Text(dateFormat.format(DateTime.parse(_reservation!.departureTime!)), style: const TextStyle(fontSize: 13, color: Colors.grey)),
                       ],
                     ),
                   ),
                   Column(
                     children: [
                       const Icon(Icons.airplanemode_active, size: 32, color: Colors.grey),
-                      Text(_reservation['flightNumber'], style: const TextStyle(fontSize: 12, color: Colors.grey)),
+                      Text(_reservation!.flightCode ?? 'N/A', style: const TextStyle(fontSize: 12, color: Colors.grey)),
                     ],
                   ),
                   Expanded(
@@ -162,12 +218,14 @@ class _ReservationDetailScreenState extends State<ReservationDetailScreen> {
                       crossAxisAlignment: CrossAxisAlignment.end,
                       children: [
                         const Text("Varış", style: TextStyle(color: Colors.grey, fontSize: 13)),
-                        Text(_reservation['arrival'], style: const TextStyle(fontWeight: FontWeight.bold), textAlign: TextAlign.right),
-                        Text(
-                          timeFormat.format(DateTime.parse(_reservation['arrivalTime'])),
-                          style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.teal),
-                        ),
-                        Text(dateFormat.format(DateTime.parse(_reservation['arrivalTime'])), style: const TextStyle(fontSize: 13, color: Colors.grey)),
+                        Text(_reservation!.arrivalAirport ?? 'N/A', style: const TextStyle(fontWeight: FontWeight.bold), textAlign: TextAlign.right),
+                        if (_reservation!.arrivalTime != null)
+                          Text(
+                            timeFormat.format(DateTime.parse(_reservation!.arrivalTime!)),
+                            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.teal),
+                          ),
+                        if (_reservation!.arrivalTime != null)
+                          Text(dateFormat.format(DateTime.parse(_reservation!.arrivalTime!)), style: const TextStyle(fontSize: 13, color: Colors.grey)),
                       ],
                     ),
                   ),
@@ -178,10 +236,12 @@ class _ReservationDetailScreenState extends State<ReservationDetailScreen> {
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
-                  _InfoItem(label: "Rezervasyon Kodu", value: _reservation['bookingReference']),
+                  _InfoItem(label: "Rezervasyon Kodu", value: _reservation!.reservationCode ?? 'N/A'),
                   _InfoItem(
                     label: "Rezervasyon Tarihi",
-                    value: dateFormat.format(DateTime.parse(_reservation['reservationDate'])),
+                    value: _reservation!.reservationDate != null
+                        ? dateFormat.format(DateTime.parse(_reservation!.reservationDate!))
+                        : 'N/A',
                     alignRight: true,
                   ),
                 ],
@@ -197,38 +257,49 @@ class _ReservationDetailScreenState extends State<ReservationDetailScreen> {
           title: "Yolcu Bilgileri",
           icon: Icons.group,
           iconColor: Colors.teal,
-          child: Column(
-            children: (_reservation['passengers'] as List).map((passenger) {
-              return Container(
-                margin: const EdgeInsets.only(bottom: 12),
-                padding: const EdgeInsets.all(16),
-                decoration: BoxDecoration(color: Colors.grey.shade50, borderRadius: BorderRadius.circular(8)),
-                child: Column(
+          child: _reservation!.passengerName != null
+              ? Column(
                   children: [
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        Text("${passenger['firstName']} ${passenger['lastName']}", style: const TextStyle(fontWeight: FontWeight.bold)),
-                        Container(
-                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-                          decoration: BoxDecoration(color: Colors.teal.shade50, borderRadius: BorderRadius.circular(4)),
-                          child: Text(passenger['class'], style: TextStyle(fontSize: 11, color: Colors.teal.shade700)),
-                        ),
-                      ],
+                    Container(
+                      margin: const EdgeInsets.only(bottom: 12),
+                      padding: const EdgeInsets.all(16),
+                      decoration: BoxDecoration(color: Colors.grey.shade50, borderRadius: BorderRadius.circular(8)),
+                      child: Column(
+                        children: [
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              Text(_reservation!.passengerName ?? 'N/A', style: const TextStyle(fontWeight: FontWeight.bold)),
+                              if (_reservation!.flightClass != null)
+                                Container(
+                                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                                  decoration: BoxDecoration(color: Colors.teal.shade50, borderRadius: BorderRadius.circular(4)),
+                                  child: Text(_reservation!.flightClass!, style: TextStyle(fontSize: 11, color: Colors.teal.shade700)),
+                                ),
+                            ],
+                          ),
+                          const SizedBox(height: 8),
+                          Row(
+                            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                            children: [
+                              _InfoItem(label: "Koltuk No", value: _reservation!.seatNumber ?? 'N/A'),
+                              _InfoItem(label: "Bilet No", value: _reservation!.ticketNo?.toString() ?? 'N/A', alignRight: true),
+                            ],
+                          )
+                        ],
+                      ),
                     ),
-                    const SizedBox(height: 8),
-                    Row(
-                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: [
-                        _InfoItem(label: "Koltuk No", value: passenger['seatNumber']),
-                        _InfoItem(label: "Bilet No", value: passenger['ticketNumber'], alignRight: true),
-                      ],
-                    )
+                    if (_reservation!.passengerCount != null && _reservation!.passengerCount! > 1)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 8),
+                        child: Text(
+                          '+ ${_reservation!.passengerCount! - 1} yolcu daha',
+                          style: TextStyle(fontSize: 12, color: Colors.grey.shade600, fontStyle: FontStyle.italic),
+                        ),
+                      ),
                   ],
-                ),
-              );
-            }).toList(),
-          ),
+                )
+              : const Text("Yolcu bilgisi bulunamadı."),
         ),
       ],
     );
@@ -246,11 +317,11 @@ class _ReservationDetailScreenState extends State<ReservationDetailScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _InfoItem(label: "Ad Soyad", value: _reservation['userName']),
+              _InfoItem(label: "Ad Soyad", value: _reservation!.customerName ?? 'N/A'),
               const SizedBox(height: 12),
-              _InfoItem(label: "E-posta", value: _reservation['userEmail']),
+              _InfoItem(label: "E-posta", value: _reservation!.email ?? 'N/A'),
               const SizedBox(height: 12),
-              _InfoItem(label: "Telefon", value: _reservation['userPhone']),
+              _InfoItem(label: "Telefon", value: _reservation!.phone ?? 'N/A'),
             ],
           ),
         ),
@@ -265,13 +336,13 @@ class _ReservationDetailScreenState extends State<ReservationDetailScreen> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              _InfoItem(label: "Ödeme Yöntemi", value: _reservation['paymentMethod']),
+              _InfoItem(label: "Ödeme Yöntemi", value: _reservation!.paymentMethod ?? 'Kredi Kartı'),
               const Padding(padding: EdgeInsets.symmetric(vertical: 12), child: Divider()),
               Row(
                 mainAxisAlignment: MainAxisAlignment.spaceBetween,
                 children: [
                   const Text("Yolcu Sayısı", style: TextStyle(color: Colors.grey)),
-                  Text("${(_reservation['passengers'] as List).length}", style: const TextStyle(fontWeight: FontWeight.bold)),
+                  Text("${_reservation!.passengerCount ?? 1}", style: const TextStyle(fontWeight: FontWeight.bold)),
                 ],
               ),
               const SizedBox(height: 8),
@@ -280,7 +351,9 @@ class _ReservationDetailScreenState extends State<ReservationDetailScreen> {
                 children: [
                   const Text("Toplam Tutar", style: TextStyle(fontWeight: FontWeight.bold)),
                   Text(
-                    currencyFormat.format(_reservation['totalAmount']),
+                    _reservation!.totalAmount != null
+                        ? currencyFormat.format(_reservation!.totalAmount!)
+                        : 'N/A',
                     style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.teal),
                   ),
                 ],
@@ -317,7 +390,7 @@ class _ReservationDetailScreenState extends State<ReservationDetailScreen> {
                   style: ElevatedButton.styleFrom(backgroundColor: Colors.blue, foregroundColor: Colors.white),
                 ),
               ),
-              if (_reservation['status'] == 'Active') ...[
+              if (_reservation!.reservationStatus == 'Active' || _reservation!.reservationStatus == 'Confirmed') ...[
                 const SizedBox(height: 8),
                 SizedBox(
                   width: double.infinity,
